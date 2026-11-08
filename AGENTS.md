@@ -3,7 +3,7 @@
 - Dự án C# chia sẻ tệp P2P qua TCP; trao đổi và tài liệu học bằng tiếng Việt.
 - Nhóm được Linh xác nhận gồm Linh, Minh, Cường, Quân, Tú. Không suy ra MSSV, tài khoản, đóng góp hay việc đã nhận từ phân công đề xuất.
 - Linh xác nhận dùng C# được phép ngày 23/10/2026; không hỏi lại việc chọn ngôn ngữ vì danh sách cũ chỉ nêu Python/C++/Java.
-- Đọc `agent/RECOVERY_NOTES.md` và `agent/CURRENT_STATE.md` khi bắt đầu hoặc tiếp tục sau gián đoạn; dùng `agent/CONTEXT_MANIFEST.md` để tìm tài liệu đúng việc. Không nạp toàn bộ lịch sử mặc định.
+- Đọc `.github/agent/RECOVERY_NOTES.md` và `.github/agent/CURRENT_STATE.md` khi bắt đầu hoặc tiếp tục sau gián đoạn; dùng `.github/agent/CONTEXT_MANIFEST.md` để tìm tài liệu đúng việc. Không nạp toàn bộ lịch sử mặc định.
 - Khi hướng dẫn học, giải thích input/output, trách nhiệm, reference, ownership và lỗi; cho thành viên tự thiết kế/viết implementation theo bước nhỏ, rồi review. Khi người dùng yêu cầu rõ viết code hoặc làm trọn tính năng, thực hiện theo yêu cầu hiện tại. Bộ khởi tạo và công cụ dự án có thể được dựng trong phạm vi đã giao.
 - Linh tự phân công hàng tuần ai làm gì và cần đọc gì. Assistant xây học liệu có giải thích, ví dụ, bài tập/gợi ý và prerequisite theo chuyên môn; không tự gán cố định tên người với mảng hoặc deadline viết code khi nền chưa có. Học từ kiến thức và ví dụ trước rồi nâng mức thực hành theo Linh giao.
 - Tổ chức tài liệu theo nhu cầu P2P, tra qua `docs/README.md`. Không sao chép mọi quy trình của môn Hệ điều hành; không tạo hồ sơ onboarding theo người hoặc mẫu tiến độ trùng với kế hoạch chỉ vì dự án kia có.
@@ -15,4 +15,4 @@
 - Core không phụ thuộc implementation native Windows. Tích hợp Vst qua hợp đồng có ownership; benchmark managed và Vst trên cùng môi trường Windows và cùng chính sách I/O.
 - Giữ cấu trúc ít project/module theo nhu cầu thật. Không thêm framework web, ORM, DI tổng quát hoặc DHT chỉ để làm kiến trúc lớn hơn.
 - Thao tác Git của thành viên ưu tiên GitHub Desktop; assistant không stage/commit/push hay tạo repo GitHub khi chưa được giao rõ. Theo yêu cầu Linh ngày 07/11/2026, remote làm việc tạm là `https://github.com/kimlinh25/BTL.MMT.git`; remote `original` giữ `https://github.com/kimsakota/BTL.MMT.git` để đối chiếu khi khôi phục, nhánh chính `main`. Linh đã giao commit/push bộ khởi tạo ngày 23/10/2026; yêu cầu này không mặc nhiên cho phép mọi lần push về sau.
-- Sau mốc có ý nghĩa cập nhật bộ nhớ đúng bằng chứng theo `agent/DOCS_GUIDE.md`; mọi thành viên phải có đầu ra kỹ thuật và minh chứng riêng.
+- Sau mốc có ý nghĩa cập nhật bộ nhớ đúng bằng chứng theo `.github/agent/DOCS_GUIDE.md`; mọi thành viên phải có đầu ra kỹ thuật và minh chứng riêng.

@@ -1,6 +1,6 @@
 # Tài liệu dự án P2P ET4230
 
-Điểm vào chung cho tài liệu Đề 14 bằng C# của Linh, Minh, Cường, Quân, Tú. Đọc theo việc đang làm; trạng thái chương trình nằm ở [README dự án](../README.md) và [bộ nhớ hiện tại](../agent/CURRENT_STATE.md).
+Điểm vào chung cho tài liệu Đề 14 bằng C# của Linh, Minh, Cường, Quân, Tú. Đọc theo việc đang làm; trạng thái chương trình nằm ở [README dự án](../README.md) và [bộ nhớ hiện tại](../.github/agent/CURRENT_STATE.md).
 
 ## Cần tìm gì
 
@@ -35,7 +35,7 @@ docs/
 └── tham-khao/                 # Nguồn, hash và lý do chọn đề tài
 ```
 
-Mỗi nội dung có một nơi chính: yêu cầu ở Tổng quan, nhiệm vụ ở Kế hoạch, hợp đồng kỹ thuật ở Thiết kế. Bài học giải thích và dẫn tới hợp đồng; chúng không định nghĩa một phiên bản giao thức riêng. Hướng dẫn Git nằm trong [CONTRIBUTING](../CONTRIBUTING.md), dữ liệu thực nghiệm nằm ở `results/`, bộ nhớ assistant nằm ở `agent/`.
+Mỗi nội dung có một nơi chính: yêu cầu ở Tổng quan, nhiệm vụ ở Kế hoạch, hợp đồng kỹ thuật ở Thiết kế. Bài học giải thích và dẫn tới hợp đồng; chúng không định nghĩa một phiên bản giao thức riêng. Hướng dẫn Git nằm trong [CONTRIBUTING](../CONTRIBUTING.md), dữ liệu thực nghiệm nằm ở `results/`, bộ nhớ assistant nằm ở `.github/agent/`.
 
 ## Bắt đầu
 
