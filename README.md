@@ -2,7 +2,7 @@
 
 Dự án của **Linh, Minh, Cường, Quân, Tú**, chuẩn bị ngày 23/10/2026. Mục tiêu là tự xây hệ thống truyền tệp TCP nhiều nguồn, chia sẻ lại phân mảnh đã xác minh và phục hồi khi peer rời mạng; áp dụng kiến thức buffer, I/O và ownership từ VstHelper.
 
-**Hiện tại là bộ khởi tạo để học và triển khai.** Solution .NET 10 có Core chưa có implementation, CLI chỉ hỗ trợ `--help`/`--version`, và wrapper biên dịch snapshot VstHelper. Chưa có tracker, peer, truyền tệp, kiểm thử mạng hoặc kết quả benchmark. Trạng thái kiểm chứng mới nhất nằm ở [bộ nhớ dự án](agent/CURRENT_STATE.md).
+**Hiện tại là bộ khởi tạo để học và triển khai.** Solution .NET 10 có Core chưa có implementation, CLI chỉ hỗ trợ `--help`/`--version`, và wrapper biên dịch snapshot VstHelper. Chưa có tracker, peer, truyền tệp, kiểm thử mạng hoặc kết quả benchmark. Trạng thái kiểm chứng mới nhất nằm ở [bộ nhớ dự án](.github/agent/CURRENT_STATE.md).
 
 [Kiểm tra bộ khởi tạo](docs/trien-khai/Kiem-tra-bo-khoi-tao.md): build Debug/Release thành công, CLI trả exit code đúng; 10 warning CS8500 của Vst được giữ để audit. Repository: [kimsakota/BTL.MMT](https://github.com/kimsakota/BTL.MMT), nhánh chính `main`.
 
@@ -51,7 +51,7 @@ Lệnh Python cuối cần Python 3.10+ và chỉ dùng standard library; có th
 | `tests/` | Kế hoạch test và vector giao thức; chưa có test ứng dụng |
 | `tools/` | Kiểm tra cấu trúc, lập chỉ mục slide, chụp snapshot tham chiếu |
 | `docs/` | [Mục lục](docs/README.md): học tập, thiết kế, triển khai, kiểm chứng và tham khảo |
-| `agent/` | Bộ nhớ ngắn, nguồn chuẩn và điểm tiếp tục |
+| `.github/agent/` | Bộ nhớ ngắn, nguồn chuẩn và điểm tiếp tục |
 | `results/`, `plots/`, `demo/` | Quy ước lưu bằng chứng khi có chạy thật |
 
 Workflow `.github/workflows/validate.yml` kiểm tra cấu trúc, config, hash snapshot và build/bootstrap trên Windows khi push hoặc mở PR. Xem trạng thái thực tế ở [GitHub Actions](https://github.com/kimsakota/BTL.MMT/actions); workflow này chưa thay kiểm thử ứng dụng P2P.
