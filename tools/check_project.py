@@ -34,7 +34,7 @@ def main() -> int:
         return json.loads((ROOT / relative).read_text(encoding="utf-8-sig"))
 
     files = [p for p in ROOT.rglob("*") if p.is_file() and not set(p.relative_to(ROOT).parts) & SKIP]
-    required = ["README.md", "AGENTS.md", "ET4230.P2P.sln", "agent/CURRENT_STATE.md", "agent/RECOVERY_NOTES.md", "docs/README.md", "docs/Tong-quan.md", "docs/Ke-hoach.md", "docs/thiet-ke/Giao-thuc-v1.md", "docs/hoc-tap/Kien-thuc-tu-slide.md"]
+    required = ["README.md", "AGENTS.md", "ET4230.P2P.sln", ".github/agent/CURRENT_STATE.md", ".github/agent/RECOVERY_NOTES.md", "docs/README.md", "docs/Tong-quan.md", "docs/Ke-hoach.md", "docs/thiet-ke/Giao-thuc-v1.md", "docs/hoc-tap/Kien-thuc-tu-slide.md"]
     for relative in required:
         require((ROOT / relative).is_file(), f"Missing required file: {relative}")
 

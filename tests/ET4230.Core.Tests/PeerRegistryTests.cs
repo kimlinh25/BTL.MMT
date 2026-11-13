@@ -66,7 +66,110 @@ public class PeerRegistryTests
         var list = (List<PeerEndpoint>)registry.ListActive("file1");
         list.Clear(); 
 
-        // Dữ liệu gốc trong Registry vẫn còn nguyên vẹn 1 phần tử[cite: 1, 3]
+        // Dữ liệu gốc trong Registry vẫn còn nguyên vẹn 1 phần tử
         Assert.Single(registry.ListActive("file1"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Register_HostRongHoacBlank_BiTuChoi(string invalidHost)
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+        var ep = new PeerEndpoint("peerA", invalidHost, 42301);
+
+        Assert.Throws<ArgumentException>(() => registry.Register("file1", ep));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Register_PeerIdRongHoacBlank_BiTuChoi(string invalidPeerId)
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+        var ep = new PeerEndpoint(invalidPeerId, "192.168.1.1", 42301);
+
+        Assert.Throws<ArgumentException>(() => registry.Register("file1", ep));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void Register_PortNgoaiDai_BiTuChoi(int invalidPort)
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+        var ep = new PeerEndpoint("peerA", "192.168.1.1", invalidPort);
+
+        Assert.Throws<ArgumentException>(() => registry.Register("file1", ep));
+    }
+
+    [Fact]
+    public void Register_LaiCungKey_CapNhatEndpointVaLamMoiTTL()
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+
+        Assert.True(registry.Register("file1", new PeerEndpoint("peerA", "192.168.1.1", 42301)));
+        clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.True(registry.Register("file1", new PeerEndpoint("peerA", "192.168.1.2", 42309)));
+
+        // Ở t=20: nếu không làm mới LastSeen ở t=15 thì đã hết hạn
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var active = registry.ListActive("file1");
+
+        var only = Assert.Single(active);
+        Assert.Equal("192.168.1.2", only.Host);
+        Assert.Equal(42309, only.Port);
+    }
+
+    [Fact]
+    public void Register_VuotMaxEntries_BiTuChoi_VaDonHetHanTruoc()
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 2);
+
+        Assert.True(registry.Register("file1", new PeerEndpoint("peerA", "192.168.1.1", 42301)));
+        Assert.True(registry.Register("file1", new PeerEndpoint("peerB", "192.168.1.2", 42302)));
+        Assert.False(registry.Register("file1", new PeerEndpoint("peerC", "192.168.1.3", 42303)));
+
+        // Sau khi hết TTL, các entry cũ được dọn để nhường chỗ
+        clock.Advance(TimeSpan.FromSeconds(20));
+        Assert.True(registry.Register("file1", new PeerEndpoint("peerC", "192.168.1.3", 42303)));
+    }
+
+    [Fact]
+    public void Heartbeat_GiaHanThanhCongKhiConHan_VaTuChoiInputRong()
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+        registry.Register("file1", new PeerEndpoint("peerA", "192.168.1.1", 42301));
+
+        clock.Advance(TimeSpan.FromSeconds(15));
+        Assert.True(registry.Heartbeat("file1", "peerA"));
+
+        // Tại t=34 (19s sau heartbeat ở t=15), vẫn còn hạn (age < 20)
+        clock.Advance(TimeSpan.FromSeconds(19));
+        Assert.Single(registry.ListActive("file1"));
+
+        Assert.Throws<ArgumentException>(() => registry.Heartbeat("", "peerA"));
+        Assert.Throws<ArgumentException>(() => registry.Heartbeat("file1", "   "));
+    }
+
+    [Fact]
+    public void ListActive_ChiTraPeerCuaDungFileId()
+    {
+        var clock = new FakeClock();
+        var registry = new PeerRegistry(clock, TimeSpan.FromSeconds(20), 10);
+
+        registry.Register("file1", new PeerEndpoint("peerA", "192.168.1.1", 42301));
+        registry.Register("file2", new PeerEndpoint("peerB", "192.168.1.2", 42302));
+
+        var file1Peers = registry.ListActive("file1");
+        var only = Assert.Single(file1Peers);
+        Assert.Equal("peerA", only.PeerId);
     }
 }
