@@ -8,6 +8,7 @@ public sealed class PeerRegistry
     private sealed record RegistryEntry(PeerEndpoint Endpoint, TimeSpan LastSeen);
 
     private readonly Dictionary<PeerKey, RegistryEntry> _entries = new();
+    private readonly Lock _gate = new();
     private readonly IElapsedClock _clock;
     private readonly TimeSpan _ttl;
     private readonly int _maxEntries;
@@ -22,84 +23,107 @@ public sealed class PeerRegistry
         _maxEntries = maxEntries;
     }
 
-    // Các hàm Register, Heartbeat, ListActive sẽ được viết tại đây
     public bool Register(string fileId, PeerEndpoint endpoint)
     {
-    // 1. Chặn input sai quy tắc từ hợp đồng (TC05)
-    if (string.IsNullOrWhiteSpace(fileId)) throw new ArgumentException("FileId không hợp lệ");
-    if (endpoint == null) throw new ArgumentNullException(nameof(endpoint));
-    if (endpoint.Port <= 0 || endpoint.Port > 65535) throw new ArgumentException("Port ngoài dải hợp lệ");
-    if (endpoint.Host == "0.0.0.0") throw new ArgumentException("Không được công bố IP Wildcard 0.0.0.0"); //[cite: 2]
+        if (string.IsNullOrWhiteSpace(fileId))
+            throw new ArgumentException("FileId không hợp lệ.", nameof(fileId));
+        ArgumentNullException.ThrowIfNull(endpoint);
+        if (string.IsNullOrWhiteSpace(endpoint.PeerId))
+            throw new ArgumentException("PeerId không hợp lệ.", nameof(endpoint));
+        if (string.IsNullOrWhiteSpace(endpoint.Host))
+            throw new ArgumentException("Host không hợp lệ.", nameof(endpoint));
+        if (endpoint.Port <= 0 || endpoint.Port > 65535)
+            throw new ArgumentException("Port ngoài dải hợp lệ (1..65535).", nameof(endpoint));
+        if (string.Equals(endpoint.Host.Trim(), "0.0.0.0", StringComparison.Ordinal))
+            throw new ArgumentException("Không được công bố IP wildcard 0.0.0.0.", nameof(endpoint));
 
-    var now = _clock.Elapsed;
-    var key = new PeerKey(fileId, endpoint.PeerId);
-
-    // 2. Dọn dẹp các peer đã hết hạn trước khi xét sức chứa (age >= TTL)
-    var expiredKeys = new List<PeerKey>();
-    foreach (var entry in _entries)
-    {
-        if (now - entry.Value.LastSeen >= _ttl)
+        lock (_gate)
         {
-            expiredKeys.Add(entry.Key);
-        }
-    }
-    foreach (var k in expiredKeys) _entries.Remove(k);
+            var now = _clock.Elapsed;
+            var key = new PeerKey(fileId, endpoint.PeerId);
 
-    // 3. Cập nhật (TC02) hoặc Thêm mới (TC06)
-    if (_entries.ContainsKey(key))
-    {
-        // Đã tồn tại: ghi đè endpoint mới và làm mới thời gian
-        _entries[key] = new RegistryEntry(endpoint, now);
-        return true;
-    }
-    else
-    {
-        // Chưa tồn tại: kiểm tra sức chứa trước khi cho vào
-        if (_entries.Count >= _maxEntries) return false; // Bị từ chối do đầy capacity
-        
-        _entries.Add(key, new RegistryEntry(endpoint, now));
-        return true;
-    }
-    }
-    public bool Heartbeat(string fileId, string peerId)
-    {
-        var now = _clock.Elapsed;
-        var key = new PeerKey(fileId, peerId);
+            RemoveExpiredEntries(now);
 
-        if (_entries.TryGetValue(key, out var entry))
-        {
-            // Kiểm tra biên hết hạn (age >= TTL)
-            if (now - entry.LastSeen >= _ttl)
+            if (_entries.ContainsKey(key))
             {
-                _entries.Remove(key); // Dọn dẹp rác luôn
-                return false; 
+                // Đã tồn tại: ghi đè endpoint mới và làm mới LastSeen
+                _entries[key] = new RegistryEntry(endpoint, now);
+                return true;
             }
-            
-            // Còn hiệu lực -> Cập nhật mốc thời gian báo sống
-            _entries[key] = new RegistryEntry(entry.Endpoint, now);
+
+            if (_entries.Count >= _maxEntries)
+                return false;
+
+            _entries.Add(key, new RegistryEntry(endpoint, now));
             return true;
         }
+    }
 
-        // Khóa lạ chưa từng Register -> Không tự tạo peer ảo, trả về false[cite: 3]
-        return false;
+    public bool Heartbeat(string fileId, string peerId)
+    {
+        if (string.IsNullOrWhiteSpace(fileId))
+            throw new ArgumentException("FileId không hợp lệ.", nameof(fileId));
+        if (string.IsNullOrWhiteSpace(peerId))
+            throw new ArgumentException("PeerId không hợp lệ.", nameof(peerId));
+
+        lock (_gate)
+        {
+            var now = _clock.Elapsed;
+            var key = new PeerKey(fileId, peerId);
+
+            if (_entries.TryGetValue(key, out var entry))
+            {
+                if (now - entry.LastSeen >= _ttl)
+                {
+                    _entries.Remove(key);
+                    return false;
+                }
+
+                _entries[key] = new RegistryEntry(entry.Endpoint, now);
+                return true;
+            }
+
+            return false;
+        }
     }
 
     public IReadOnlyList<PeerEndpoint> ListActive(string fileId)
     {
-        var now = _clock.Elapsed;
-        var activePeers = new List<PeerEndpoint>();
+        if (string.IsNullOrWhiteSpace(fileId))
+            throw new ArgumentException("FileId không hợp lệ.", nameof(fileId));
 
-        foreach (var kvp in _entries)
+        lock (_gate)
         {
-            // Chỉ lấy peer của đúng fileId này và chưa hết hạn (age < TTL)[cite: 3]
-            if (kvp.Key.FileId == fileId && (now - kvp.Value.LastSeen < _ttl))
+            var now = _clock.Elapsed;
+            var activePeers = new List<PeerEndpoint>();
+
+            foreach (var kvp in _entries)
             {
-                activePeers.Add(kvp.Value.Endpoint);
+                if (kvp.Key.FileId == fileId && (now - kvp.Value.LastSeen < _ttl))
+                {
+                    activePeers.Add(kvp.Value.Endpoint);
+                }
+            }
+
+            // Trả về bản sao mới (snapshot) để caller không sửa ngược vào _entries
+            return activePeers;
+        }
+    }
+
+    private void RemoveExpiredEntries(TimeSpan now)
+    {
+        var expiredKeys = new List<PeerKey>();
+        foreach (var entry in _entries)
+        {
+            if (now - entry.Value.LastSeen >= _ttl)
+            {
+                expiredKeys.Add(entry.Key);
             }
         }
 
-        // Trả về một List mới (snapshot). Caller có gọi list.Clear() 
-        // thì dữ liệu _entries gốc cũng không bị ảnh hưởng (ngắt alias)
-        return activePeers;
+        foreach (var key in expiredKeys)
+        {
+            _entries.Remove(key);
+        }
     }
 }
