@@ -1,5 +1,8 @@
 # BTL.MMT · ET4230 Đề 14 Chia sẻ tệp P2P bằng C#
 
+> Nhóm làm tiếp trên **kimlinh25/BTL.MMT** từ 07/11/2026. Xem [hướng dẫn repo tạm và quay về tài khoản cũ](docs/GitHub-tam-thoi.md).
+
+
 Dự án của **Linh, Minh, Cường, Quân, Tú**, chuẩn bị ngày 23/10/2026. Mục tiêu là tự xây hệ thống truyền tệp TCP nhiều nguồn, chia sẻ lại phân mảnh đã xác minh và phục hồi khi peer rời mạng; áp dụng kiến thức buffer, I/O và ownership từ VstHelper.
 
 **Hiện tại là bộ khởi tạo để học và triển khai.** Solution .NET 10 có Core chưa có implementation, CLI chỉ hỗ trợ `--help`/`--version`, và wrapper biên dịch snapshot VstHelper. Chưa có tracker, peer, truyền tệp, kiểm thử mạng hoặc kết quả benchmark. Trạng thái kiểm chứng mới nhất nằm ở [bộ nhớ dự án](.github/agent/CURRENT_STATE.md).

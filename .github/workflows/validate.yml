@@ -24,6 +24,8 @@ jobs:
         run: python tools/check_project.py
       - name: Build the bootstrap and Vst reference
         run: dotnet build ET4230.P2P.sln --configuration Release --nologo
+      - name: Run Core unit tests
+        run: dotnet test tests/ET4230.Core.Tests/ET4230.Core.Tests.csproj --configuration Release --no-build --nologo
       - name: Run bootstrap help
         run: dotnet run --no-build --configuration Release --project src/ET4230.Cli -- --help
       - name: Run bootstrap version

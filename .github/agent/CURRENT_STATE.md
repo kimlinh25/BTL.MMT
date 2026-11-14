@@ -1,5 +1,12 @@
 # Trạng thái hiện tại ET4230
 
+## Sửa đường dẫn kiểm tra bootstrap — 08/11/2026
+
+Linh yêu cầu khắc phục workflow thất bại sau merge PR#15. Log run42453787595 trên main0563fba cho thấy checker dừng với39lỗi vì memory đã chuyển sang `.github/agent/` nhưng required paths và relative links còn vị trí cũ. Đã cập nhật checker, README/mục lục, AGENTS và các link đi từ memory ra root theo vị trí thực.
+
+Kiểm tra local trên Windows/.NET SDK10.0.301/Python3.13.13: `python tools/check_project.py` đạt0lỗi, kiểm đúng21file snapshot và2vector. `dotnet build ET4230.P2P.sln --configuration Release --nologo` đạt0error,10warningCS8500 thuộc VstReference. CLI Release `--help` và `--version` đều exit0. Phạm vi là cấu trúc/config/hash và bootstrap, chưa phải test P2P hoặc nghiệm thu test project chung của#13. Bản sửa do assistant thực hiện theo yêu cầu hiện tại của Linh; kết quả CI trên GitHub cần đọc tại PR/run tương ứng.
+
+
 Cập nhật 23/10/2026. Đây là bộ khởi tạo dự án Đề 14; chưa có application P2P.
 
 Kiểm tra kết nối Git ngày 23/10/2026: origin vẫn đúng, `git ls-remote origin refs/heads/main` trả về cùng SHA với HEAD `a570e602e04564a06f55be13ae0851220236f6e0`. Visual Studio đang mở đúng thư mục nhưng chưa kích hoạt repository; đã chọn BTL (Mạng máy tính) qua Git > Local Repositories. UI xác nhận đúng đường dẫn, nhánh main, 0 outgoing / 0 incoming và 40 thay đổi local tại thời điểm kiểm tra. Không stage/commit/push; học liệu mới vẫn chưa được xuất bản. Khi tiếp tục, kiểm tra vị trí memory thực tế: các file hiện nằm trong `.github/agent/`, chưa sửa lại các tham chiếu cũ trong đợt chẩn đoán Git này.

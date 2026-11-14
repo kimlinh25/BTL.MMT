@@ -15,4 +15,4 @@
 - Core không phụ thuộc implementation native Windows. Tích hợp Vst qua hợp đồng có ownership; benchmark managed và Vst trên cùng môi trường Windows và cùng chính sách I/O.
 - Giữ cấu trúc ít project/module theo nhu cầu thật. Không thêm framework web, ORM, DI tổng quát hoặc DHT chỉ để làm kiến trúc lớn hơn.
 - Thao tác Git của thành viên ưu tiên GitHub Desktop; assistant không stage/commit/push hay tạo repo GitHub khi chưa được giao rõ. Remote hiện hành là `https://github.com/kimsakota/BTL.MMT.git`, nhánh chính `main`. Linh đã giao commit/push bộ khởi tạo ngày 23/10/2026; yêu cầu này không mặc nhiên cho phép mọi lần push về sau.
-- Sau mốc có ý nghĩa cập nhật bộ nhớ đúng bằng chứng theo `.github/agent/DOCS_GUIDE.md`; mọi thành viên phải có đầu ra kỹ thuật và minh chứng riêng.
+- Sau mốc có ý nghĩa cập nhật bộ nhớ đúng bằng chứng theo `agent/DOCS_GUIDE.md`; mọi thành viên phải có đầu ra kỹ thuật và minh chứng riêng.
