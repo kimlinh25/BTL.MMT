@@ -27,11 +27,12 @@ public sealed class SequentialReceiverTests : IDisposable
         int[] indices = fileLength == 0 ? [] : [0, 1, 2];
         var source = new StorageSeed(seed, indices);
         string output = Path.Combine(_directory, "receiver.bin");
-        using var storage = new FileStorage(output, manifest);
-
-        ReceiverResult result = await RunAsync(storage,
-            (stream, ct) => SeedSession.RunAsync(stream, Guid.NewGuid(), source, ct));
-
+        ReceiverResult result;
+using (var storage = new FileStorage(output, manifest))
+{
+    result = await RunAsync(storage,
+        (stream, ct) => SeedSession.RunAsync(stream, Guid.NewGuid(), source, ct));
+}
         Assert.Equal(ReceiverStatus.Completed, result.Status);
         Assert.Equal(indices.Length, result.VerifiedPieces);
         Assert.Equal(indices.Length, result.TotalPieces);
