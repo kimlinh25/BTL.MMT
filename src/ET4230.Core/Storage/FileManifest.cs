@@ -136,7 +136,7 @@ public sealed class FileManifest
         var layout = new PieceLayout(fileSize, pieceLength, blockLength);
         var pieceHashes = new List<string>(layout.PieceCount);
 
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var fullFileHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
         for (int p = 0; p < layout.PieceCount; p++)

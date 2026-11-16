@@ -72,7 +72,7 @@ public sealed class FileStorage : IDisposable
         var fileMode = isSeed ? FileMode.Open : FileMode.OpenOrCreate;
         var fileAccess = isSeed ? FileAccess.Read : FileAccess.ReadWrite;
 
-        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.ReadWrite);
+        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.Read); ;
 
         if (isSeed)
         {
