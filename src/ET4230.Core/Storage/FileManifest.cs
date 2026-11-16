@@ -6,26 +6,68 @@ namespace ET4230.Core.Storage;
 
 public sealed class FileManifest
 {
+    private readonly string _fileId = string.Empty;
+    private readonly IReadOnlyList<string>? _pieceHashes = Array.Empty<string>();
+
     [JsonPropertyName("version")]
     public int Version { get; init; } = 1;
 
     [JsonPropertyName("fileId")]
-    public string FileId { get; init; } = string.Empty;
+    public string FileId
+    {
+        get => _fileId;
+        init => _fileId = value?.Trim().ToLowerInvariant() ?? string.Empty;
+    }
 
-    [JsonPropertyName("fileName")]
-    public string FileName { get; init; } = string.Empty;
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; init; } = string.Empty;
 
-    [JsonPropertyName("fileSize")]
-    public long FileSize { get; init; }
+    [JsonPropertyName("fileSizeBytes")]
+    public long FileSizeBytes { get; init; }
 
-    [JsonPropertyName("pieceLength")]
-    public int PieceLength { get; init; }
+    [JsonPropertyName("pieceSizeBytes")]
+    public int PieceSizeBytes { get; init; }
 
-    [JsonPropertyName("blockLength")]
-    public int BlockLength { get; init; }
+    [JsonPropertyName("blockSizeBytes")]
+    public int BlockSizeBytes { get; init; }
 
     [JsonPropertyName("pieceHashes")]
-    public IReadOnlyList<string> PieceHashes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> PieceHashes
+    {
+        get => _pieceHashes!;
+        init => _pieceHashes = value?
+            .Select(h => h?.Trim().ToLowerInvariant() ?? string.Empty)
+            .ToArray();
+    }
+
+    // Các thuộc tính alias (JsonIgnore) giữ tương thích tên gọi nội bộ
+    [JsonIgnore]
+    public string FileName
+    {
+        get => DisplayName;
+        init => DisplayName = value;
+    }
+
+    [JsonIgnore]
+    public long FileSize
+    {
+        get => FileSizeBytes;
+        init => FileSizeBytes = value;
+    }
+
+    [JsonIgnore]
+    public int PieceLength
+    {
+        get => PieceSizeBytes;
+        init => PieceSizeBytes = value;
+    }
+
+    [JsonIgnore]
+    public int BlockLength
+    {
+        get => BlockSizeBytes;
+        init => BlockSizeBytes = value;
+    }
 
     /// <summary>
     /// Tạo đối tượng PieceLayout từ thông số của Manifest sau khi đã validate.
@@ -33,41 +75,43 @@ public sealed class FileManifest
     public PieceLayout CreateLayout()
     {
         Validate();
-        return new PieceLayout(FileSize, PieceLength, BlockLength);
+        return new PieceLayout(FileSizeBytes, PieceSizeBytes, BlockSizeBytes);
     }
 
     /// <summary>
-    /// Kiểm tra tính hợp lệ của Manifest v1 (fileSize, piece/block size, fileId, pieceHashes).
+    /// Kiểm tra tính hợp lệ của Manifest v1 (displayName, fileSizeBytes, pieceSizeBytes, blockSizeBytes, fileId, pieceHashes).
     /// </summary>
     public void Validate()
     {
         if (Version != 1)
             throw new InvalidDataException($"Phiên bản Manifest không hỗ trợ: {Version} (yêu cầu v1).");
 
+        if (string.IsNullOrWhiteSpace(DisplayName))
+            throw new InvalidDataException("Trường displayName trong Manifest không được để trống.");
+
         if (string.IsNullOrWhiteSpace(FileId) || !IsValidSha256Hex(FileId))
             throw new InvalidDataException("FileId không hợp lệ (phải là chuỗi SHA-256 hex 64 ký tự).");
 
-        // Dùng chính PieceLayout để kiểm tra ràng buộc fileSize >= 0, P >= B, P % B == 0
         PieceLayout layout;
         try
         {
-            layout = new PieceLayout(FileSize, PieceLength, BlockLength);
+            layout = new PieceLayout(FileSizeBytes, PieceSizeBytes, BlockSizeBytes);
         }
         catch (Exception ex)
         {
             throw new InvalidDataException($"Thông số kích thước trong Manifest không hợp lệ: {ex.Message}", ex);
         }
 
-        if (PieceHashes is null)
-            throw new InvalidDataException("Danh sách PieceHashes không được null.");
+        if (_pieceHashes is null)
+            throw new InvalidDataException("Danh sách pieceHashes không được null.");
 
-        if (PieceHashes.Count != layout.PieceCount)
+        if (_pieceHashes.Count != layout.PieceCount)
             throw new InvalidDataException(
-                $"Số lượng pieceHashes ({PieceHashes.Count}) không khớp với PieceCount ({layout.PieceCount}) từ PieceLayout.");
+                $"Số lượng pieceHashes ({_pieceHashes.Count}) không khớp với PieceCount ({layout.PieceCount}) từ PieceLayout.");
 
-        for (int i = 0; i < PieceHashes.Count; i++)
+        for (int i = 0; i < _pieceHashes.Count; i++)
         {
-            if (!IsValidSha256Hex(PieceHashes[i]))
+            if (!IsValidSha256Hex(_pieceHashes[i]))
                 throw new InvalidDataException($"PieceHash tại vị trí {i} không phải là SHA-256 hex 64 ký tự hợp lệ.");
         }
     }
@@ -92,7 +136,7 @@ public sealed class FileManifest
         var layout = new PieceLayout(fileSize, pieceLength, blockLength);
         var pieceHashes = new List<string>(layout.PieceCount);
 
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var fullFileHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
         for (int p = 0; p < layout.PieceCount; p++)
@@ -121,10 +165,10 @@ public sealed class FileManifest
         {
             Version = 1,
             FileId = fileId,
-            FileName = fileInfo.Name,
-            FileSize = fileSize,
-            PieceLength = pieceLength,
-            BlockLength = blockLength,
+            DisplayName = fileInfo.Name,
+            FileSizeBytes = fileSize,
+            PieceSizeBytes = pieceLength,
+            BlockSizeBytes = blockLength,
             PieceHashes = pieceHashes
         };
 
@@ -143,8 +187,18 @@ public sealed class FileManifest
         if (string.IsNullOrWhiteSpace(json))
             throw new InvalidDataException("Nội dung JSON của Manifest rỗng.");
 
-        var manifest = JsonSerializer.Deserialize<FileManifest>(json)
-            ?? throw new InvalidDataException("Không thể đọc dữ liệu Manifest từ JSON.");
+        FileManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<FileManifest>(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"JSON Manifest không đúng định dạng v1: {ex.Message}", ex);
+        }
+
+        if (manifest is null)
+            throw new InvalidDataException("Không thể đọc dữ liệu Manifest từ JSON.");
 
         manifest.Validate();
         return manifest;
