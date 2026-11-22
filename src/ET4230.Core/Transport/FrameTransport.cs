@@ -10,10 +10,17 @@ public sealed record Frame(FrameHeader Header, ReadOnlyMemory<byte> Payload);
 
 public static class FrameTransport
 {
+    public static ValueTask<Frame?> ReadAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default) =>
+        ReadAsync(stream, 1024 * 1024, cancellationToken);
+
     public static async ValueTask<Frame?> ReadAsync(
         Stream stream,
-        CancellationToken cancellationToken = default)
+        int maxPayloadBytes,
+        CancellationToken cancellationToken)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPayloadBytes);
         // Cấp phát một mảng byte có kích thước bằng HeaderSize để lưu trữ header.
         var headerBytes = new byte[HeaderCodec.HeaderSize];
         // Đọc header từ luồng stream vào mảng headerBytes.
@@ -33,6 +40,8 @@ public static class FrameTransport
 
         // Kiểm tra xem payloadlength có bị vượt quá giới hạn cho phép hay không.
         int length = checked((int)header.PayloadLength);
+        if (length > maxPayloadBytes)
+            throw new InvalidDataException($"Payload {length} byte vượt giới hạn {maxPayloadBytes} byte.");
 
         byte[] payload = length == 0 ? Array.Empty<byte>() : new byte[length];
 

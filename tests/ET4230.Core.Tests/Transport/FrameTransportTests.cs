@@ -46,6 +46,16 @@ public sealed class FrameTransportTests
     }
 
     [Fact]
+    public async Task RejectsPayloadAboveCallerLimitWithoutReadingIt()
+    {
+        using var stream = new MemoryStream(Convert.FromHexString(
+            "453432330110000000000001000000047b7d2020"));
+        await Assert.ThrowsAsync<InvalidDataException>(
+            async () => { await FrameTransport.ReadAsync(stream, 3, CancellationToken.None); });
+        Assert.Equal(16L, stream.Position);
+    }
+
+    [Fact]
     public async Task SendsAnEmptyCancelPayloadWithTheExpectedWireBytes()
     {
         using var stream = new MemoryStream();

@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using ET4230.Core.Transport;
 
 namespace ET4230.Core.Discovery;
 
@@ -147,10 +148,10 @@ public sealed class TrackerServer : IAsyncDisposable
                     using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     readCts.CancelAfter(_options.ReadTimeout);
 
-                    FrameMessage? frame;
+                    Frame? frame;
                     try
                     {
-                        frame = await FrameStreamHelper.ReadFrameAsync(
+                        frame = await FrameTransport.ReadAsync(
                             stream,
                             _options.MaxControlPayloadBytes,
                             readCts.Token).ConfigureAwait(false);
@@ -171,11 +172,12 @@ public sealed class TrackerServer : IAsyncDisposable
                     if (frame is null)
                         break; // Client đóng kết nối sạch
 
-                    var result = _dispatcher.Dispatch(frame.Header, frame.Payload);
+                    var result = _dispatcher.Dispatch(frame.Header, frame.Payload.Span);
 
-                    await FrameStreamHelper.WriteFrameAsync(
+                    await FrameTransport.WriteAsync(
                         stream,
-                        result.ResponseHeader,
+                        result.ResponseHeader.Type,
+                        result.ResponseHeader.RequestId,
                         result.ResponsePayload,
                         cancellationToken).ConfigureAwait(false);
 
