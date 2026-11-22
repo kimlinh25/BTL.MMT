@@ -39,7 +39,9 @@ public sealed class FileStorage : IDisposable
     public FileManifest Manifest => _manifest;
 
     /// <summary>
-    /// Mở hoặc tạo tệp đích theo đường dẫn do người chạy chỉ định (không dùng tên hiển thị từ mạng làm đường dẫn).
+    /// Mở hoặc tạo tệp đích theo đường dẫn do người chạy chỉ định.
+    /// Khi mở ở chế độ Seed (isSeed = true), tự động kiểm tra SHA-256 từng piece trên đĩa:
+    /// chỉ những piece khớp SHA-256 với Manifest mới được đánh dấu Verified và được phép phục vụ block.
     /// </summary>
     public FileStorage(string targetFilePath, FileManifest manifest, bool isSeed = false)
     {
@@ -57,28 +59,74 @@ public sealed class FileStorage : IDisposable
             Directory.CreateDirectory(dir);
         }
 
+        // Khởi tạo tất cả các cờ ở trạng thái false (chỉ bật Verified sau khi đã kiểm tra hash thật)
         _writtenBlocksPerPiece = new BitArray[_layout.PieceCount];
         for (int p = 0; p < _layout.PieceCount; p++)
         {
             int blockCount = _layout.GetBlockCountInPiece(p);
-            _writtenBlocksPerPiece[p] = new BitArray(blockCount, isSeed);
+            _writtenBlocksPerPiece[p] = new BitArray(blockCount, false);
         }
 
-        _verifiedPieces = new BitArray(_layout.PieceCount, isSeed);
+        _verifiedPieces = new BitArray(_layout.PieceCount, false);
 
         var fileMode = isSeed ? FileMode.Open : FileMode.OpenOrCreate;
         var fileAccess = isSeed ? FileAccess.Read : FileAccess.ReadWrite;
 
-        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.ReadWrite);
+        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.Read); ;
 
-        if (!isSeed && _stream.Length != _layout.FileSize)
+        if (isSeed)
+        {
+            VerifyExistingSeedPieces();
+        }
+        else if (_stream.Length != _layout.FileSize)
         {
             _stream.SetLength(_layout.FileSize);
         }
     }
 
     /// <summary>
+    /// Kiểm tra dữ liệu thực tế của tệp Seed khi mở.
+    /// Nếu chọn nhầm tệp (dù cùng kích thước nhưng khác SHA-256), piece sẽ giữ ở trạng thái chưa Verified (false).
+    /// </summary>
+    private void VerifyExistingSeedPieces()
+    {
+        if (_stream.Length != _layout.FileSize)
+        {
+            return;
+        }
+
+        for (int p = 0; p < _layout.PieceCount; p++)
+        {
+            int pLen = _layout.GetPieceLength(p);
+            long pieceOffset = (long)p * _layout.PieceLength;
+            byte[] pieceBuffer = new byte[pLen];
+
+            _stream.Seek(pieceOffset, SeekOrigin.Begin);
+            int totalRead = 0;
+            while (totalRead < pLen)
+            {
+                int read = _stream.Read(pieceBuffer, totalRead, pLen - totalRead);
+                if (read == 0) break;
+                totalRead += read;
+            }
+
+            if (totalRead != pLen)
+                continue;
+
+            string actualHash = Convert.ToHexString(SHA256.HashData(pieceBuffer)).ToLowerInvariant();
+            string expectedHash = _manifest.PieceHashes[p];
+
+            if (string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+            {
+                _writtenBlocksPerPiece[p].SetAll(true);
+                _verifiedPieces[p] = true;
+            }
+        }
+    }
+
+    /// <summary>
     /// API đọc block cho phía Seed (dùng PieceLayout làm nguồn tính range).
+    /// Chỉ phục vụ block khi piece đó đã đạt trạng thái Verified.
     /// </summary>
     public async Task<(StorageResult Result, byte[] Data)> ReadBlockAsync(
         int pieceIndex,
@@ -100,6 +148,15 @@ public sealed class FileStorage : IDisposable
         await _writerLock.WaitAsync(ct);
         try
         {
+            // Không phục vụ block nếu piece hiện tại chưa được xác minh SHA-256 (Verified)
+            if (!_verifiedPieces[pieceIndex])
+            {
+                return (new StorageResult(
+                    StorageStatus.HashMismatch,
+                    $"Piece {pieceIndex} chưa ở trạng thái Verified (chưa xác minh hoặc sai SHA-256), từ chối phục vụ block."),
+                    Array.Empty<byte>());
+            }
+
             byte[] buffer = new byte[range.length];
             _stream.Seek(range.fileOffset, SeekOrigin.Begin);
 
@@ -131,7 +188,7 @@ public sealed class FileStorage : IDisposable
 
     /// <summary>
     /// API ghi block tuần tự vào tệp đích theo fileOffset.
-    /// Lưu ý ownership: Khi Task này chưa hoàn tất, caller tuyệt đối không tái sử dụng/giải phóng buffer.
+    /// Nếu một piece đã Verified bị ghi lại, xóa ngay cờ xác minh trước khi ghi và chỉ bật lại sau khi VerifyPieceAsync khớp hash.
     /// </summary>
     public async Task<StorageResult> WriteBlockAsync(
         int pieceIndex,
@@ -161,6 +218,10 @@ public sealed class FileStorage : IDisposable
         await _writerLock.WaitAsync(ct);
         try
         {
+            // Xóa cờ xác minh của piece trước khi ghi đè; chỉ bật lại khi gọi VerifyPieceAsync và hash khớp
+            _verifiedPieces[pieceIndex] = false;
+            _writtenBlocksPerPiece[pieceIndex][blockIndex] = false;
+
             _stream.Seek(range.fileOffset, SeekOrigin.Begin);
             await _stream.WriteAsync(data, ct);
             await _stream.FlushAsync(ct);
@@ -203,7 +264,6 @@ public sealed class FileStorage : IDisposable
 
     /// <summary>
     /// Khi ghi đủ piece, đọc lại đúng vùng đã ghi trên đĩa, tính SHA-256 và đối chiếu với Manifest.
-    /// Nếu sai hash: reset trạng thái ghi của piece đó và trả lỗi HashMismatch rõ ràng cho caller.
     /// </summary>
     public async Task<StorageResult> VerifyPieceAsync(int pieceIndex, CancellationToken ct = default)
     {
@@ -222,6 +282,8 @@ public sealed class FileStorage : IDisposable
         await _writerLock.WaitAsync(ct);
         try
         {
+            _verifiedPieces[pieceIndex] = false;
+
             if (!IsPieceFullyWritten(pieceIndex))
             {
                 return new StorageResult(
@@ -247,11 +309,10 @@ public sealed class FileStorage : IDisposable
             }
 
             string actualHash = Convert.ToHexString(SHA256.HashData(pieceBuffer)).ToLowerInvariant();
-            string expectedHash = _manifest.PieceHashes[pieceIndex].ToLowerInvariant();
+            string expectedHash = _manifest.PieceHashes[pieceIndex];
 
             if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
-                // Hash sai: đánh dấu chưa verified và reset trạng thái block để caller tải lại
                 _verifiedPieces[pieceIndex] = false;
                 _writtenBlocksPerPiece[pieceIndex].SetAll(false);
 
@@ -277,13 +338,11 @@ public sealed class FileStorage : IDisposable
 
     /// <summary>
     /// Kiểm tra toàn bộ tệp khi tải xong (bao gồm cả trường hợp tệp rỗng F = 0).
-    /// Tuyệt đối không báo thành công chỉ dựa theo byte count.
     /// </summary>
     public async Task<StorageResult> VerifyFullFileAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
 
-        // Đảm bảo tất cả các piece phải được Verify trước hoặc tiến hành verify từng piece
         for (int p = 0; p < _layout.PieceCount; p++)
         {
             if (!_verifiedPieces[p])
@@ -305,13 +364,13 @@ public sealed class FileStorage : IDisposable
             {
                 return new StorageResult(
                     StorageStatus.IoError,
-                    $"Kích thước tệp trên đĩa ({_stream.Length}) khác với FileSize trong Manifest ({_layout.FileSize}).");
+                    $"Kích thước tệp trên đĩa ({_stream.Length}) khác với fileSizeBytes trong Manifest ({_layout.FileSize}).");
             }
 
             _stream.Seek(0, SeekOrigin.Begin);
             byte[] fullHashBytes = await SHA256.HashDataAsync(_stream, ct);
             string actualFileId = Convert.ToHexString(fullHashBytes).ToLowerInvariant();
-            string expectedFileId = _manifest.FileId.ToLowerInvariant();
+            string expectedFileId = _manifest.FileId;
 
             if (!string.Equals(actualFileId, expectedFileId, StringComparison.OrdinalIgnoreCase))
             {

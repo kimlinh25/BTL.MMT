@@ -18,14 +18,13 @@ public class ManifestAndStorageTests : IDisposable
     [Fact]
     public async Task CreateManifest_And_OutOfOrderWrite_WithTailBlock_VerifiesSuccessfully()
     {
-        // Tệp 19 byte, P = 8, B = 4 (3 piece: 8, 8, 3 byte; block cuối dài 3 byte)
         string seedPath = Path.Combine(_tempDir, "seed_19bytes.bin");
         string destPath = Path.Combine(_tempDir, "receiver_chosen_name.bin");
         byte[] originalData = Encoding.ASCII.GetBytes("0123456789ABCDEFGHI"); // 19 bytes
         await File.WriteAllBytesAsync(seedPath, originalData);
 
         var manifest = await FileManifest.CreateFromFileAsync(seedPath, pieceLength: 8, blockLength: 4);
-        Assert.Equal(19, manifest.FileSize);
+        Assert.Equal(19, manifest.FileSizeBytes);
         Assert.Equal(3, manifest.PieceHashes.Count);
 
         using var seedStorage = new FileStorage(seedPath, manifest, isSeed: true);
@@ -47,17 +46,16 @@ public class ManifestAndStorageTests : IDisposable
             var (_, b0) = await seedStorage.ReadBlockAsync(p, 0);
 
             await receiverStorage.WriteBlockAsync(p, 1, b1);
-            // Mới ghi 1 block thì VerifyPiece phải báo IncompletePiece, không được báo Verified
             Assert.Equal(StorageStatus.IncompletePiece, (await receiverStorage.VerifyPieceAsync(p)).Status);
 
             await receiverStorage.WriteBlockAsync(p, 0, b0);
             Assert.Equal(StorageStatus.Verified, (await receiverStorage.VerifyPieceAsync(p)).Status);
         }
 
-        // Kiểm tra toàn tệp sau khi đủ cả 3 piece
         var fullVerify = await receiverStorage.VerifyFullFileAsync();
         Assert.Equal(StorageStatus.Verified, fullVerify.Status);
-        receiverStorage.Dispose(); // Đóng luồng ghi trước khi đọc kiểm tra độc lập từ bên ngoài
+
+        receiverStorage.Dispose();
         Assert.Equal(originalData, await File.ReadAllBytesAsync(destPath));
     }
 
@@ -66,20 +64,18 @@ public class ManifestAndStorageTests : IDisposable
     {
         string seedPath = Path.Combine(_tempDir, "seed_corrupt.bin");
         string destPath = Path.Combine(_tempDir, "dest_corrupt.bin");
-        byte[] data = Encoding.ASCII.GetBytes("ABCDEFGH"); // 8 bytes, P = 8, B = 4
+        byte[] data = Encoding.ASCII.GetBytes("ABCDEFGH");
         await File.WriteAllBytesAsync(seedPath, data);
 
         var manifest = await FileManifest.CreateFromFileAsync(seedPath, 8, 4);
         using var receiverStorage = new FileStorage(destPath, manifest);
 
-        // Ghi đủ 8 byte nhưng làm sai lệch 1 byte ở block 1
         await receiverStorage.WriteBlockAsync(0, 0, Encoding.ASCII.GetBytes("ABCD"));
         await receiverStorage.WriteBlockAsync(0, 1, Encoding.ASCII.GetBytes("EFGZ")); // 'Z' thay vì 'H'
 
         var verifyRes = await receiverStorage.VerifyPieceAsync(0);
         Assert.Equal(StorageStatus.HashMismatch, verifyRes.Status);
         Assert.False(receiverStorage.IsPieceVerified(0));
-        // Sau khi HashMismatch, trạng thái written của piece phải bị reset để tải lại
         Assert.False(receiverStorage.IsPieceFullyWritten(0));
     }
 
@@ -91,7 +87,7 @@ public class ManifestAndStorageTests : IDisposable
         await File.WriteAllBytesAsync(seedPath, Array.Empty<byte>());
 
         var manifest = await FileManifest.CreateFromFileAsync(seedPath, 8, 4);
-        Assert.Equal(0, manifest.FileSize);
+        Assert.Equal(0, manifest.FileSizeBytes);
         Assert.Empty(manifest.PieceHashes);
 
         using var receiverStorage = new FileStorage(destPath, manifest);
@@ -110,13 +106,112 @@ public class ManifestAndStorageTests : IDisposable
         var manifest = await FileManifest.CreateFromFileAsync(seedPath, 8, 4);
         using var storage = new FileStorage(destPath, manifest);
 
-        // Tail block (piece 2, block 0) dài 3 byte, cố tình truyền 4 byte -> báo lỗi InvalidRange
         var badLenRes = await storage.WriteBlockAsync(2, 0, new byte[4]);
         Assert.Equal(StorageStatus.InvalidRange, badLenRes.Status);
 
-        // Piece 3 không tồn tại
         var outOfBoundsRes = await storage.WriteBlockAsync(3, 0, new byte[4]);
         Assert.Equal(StorageStatus.InvalidRange, outOfBoundsRes.Status);
+    }
+
+    [Fact]
+    public async Task ManifestV1_Deserializes_V1JsonFields_And_NormalizesUppercaseFileIdForSeed()
+    {
+        string seedPath = Path.Combine(_tempDir, "v1_seed.bin");
+        byte[] content = Encoding.ASCII.GetBytes("ABCDEFGH"); // 8 bytes
+        await File.WriteAllBytesAsync(seedPath, content);
+
+        string shaUpper = Convert.ToHexString(SHA256.HashData(content)).ToUpperInvariant();
+        string v1Json = $$"""
+        {
+          "version": 1,
+          "fileId": "{{shaUpper}}",
+          "displayName": "sample-v1.bin",
+          "fileSizeBytes": 8,
+          "pieceSizeBytes": 8,
+          "blockSizeBytes": 4,
+          "pieceHashes": [
+            "{{shaUpper}}"
+          ]
+        }
+        """;
+
+        var manifest = FileManifest.FromJson(v1Json);
+        Assert.Equal("sample-v1.bin", manifest.DisplayName);
+        Assert.Equal(8, manifest.FileSizeBytes);
+        Assert.Equal(8, manifest.PieceSizeBytes);
+        Assert.Equal(4, manifest.BlockSizeBytes);
+
+        // Kiểm tra fileId và pieceHashes viết hoa đã được chuẩn hóa về chữ thường
+        Assert.Equal(shaUpper.ToLowerInvariant(), manifest.FileId);
+        Assert.Equal(shaUpper.ToLowerInvariant(), manifest.PieceHashes[0]);
+
+        // Kiểm tra ToJson xuất đúng tên trường v1
+        string exportedJson = manifest.ToJson();
+        Assert.Contains("\"displayName\"", exportedJson);
+        Assert.Contains("\"fileSizeBytes\"", exportedJson);
+        Assert.Contains("\"pieceSizeBytes\"", exportedJson);
+        Assert.Contains("\"blockSizeBytes\"", exportedJson);
+
+        // Mở Seed với manifest chuẩn hóa từ chữ hoa hoạt động bình thường
+        using var seedStorage = new FileStorage(seedPath, manifest, isSeed: true);
+        Assert.True(seedStorage.IsPieceVerified(0));
+        var (readRes, blockData) = await seedStorage.ReadBlockAsync(0, 0);
+        Assert.Equal(StorageStatus.Ok, readRes.Status);
+        Assert.Equal(Encoding.ASCII.GetBytes("ABCD"), blockData);
+    }
+
+    [Fact]
+    public async Task Seed_WithWrongFileSameSize_KeepsPiecesUnverified_And_RefusesToServeBlock()
+    {
+        string correctSeedPath = Path.Combine(_tempDir, "correct_seed.bin");
+        string wrongSeedPath = Path.Combine(_tempDir, "wrong_seed_same_size.bin");
+
+        await File.WriteAllBytesAsync(correctSeedPath, Encoding.ASCII.GetBytes("ABCDEFGH")); // 8 bytes
+        await File.WriteAllBytesAsync(wrongSeedPath, Encoding.ASCII.GetBytes("12345678"));   // Cùng 8 bytes nhưng khác SHA-256
+
+        var manifest = await FileManifest.CreateFromFileAsync(correctSeedPath, pieceLength: 8, blockLength: 4);
+
+        // Mở Seed nhưng trỏ nhầm vào wrongSeedPath
+        using var wrongSeedStorage = new FileStorage(wrongSeedPath, manifest, isSeed: true);
+
+        // Piece phải ở trạng thái chưa Verified và không phục vụ block
+        Assert.False(wrongSeedStorage.IsPieceVerified(0));
+
+        var (readRes, data) = await wrongSeedStorage.ReadBlockAsync(0, 0);
+        Assert.Equal(StorageStatus.HashMismatch, readRes.Status);
+        Assert.Empty(data);
+    }
+
+    [Fact]
+    public async Task RewritingVerifiedPiece_ClearsVerifiedFlagBeforeWrite_And_OnlyReenablesWhenHashMatches()
+    {
+        string seedPath = Path.Combine(_tempDir, "rewrite_seed.bin");
+        string destPath = Path.Combine(_tempDir, "rewrite_dest.bin");
+        await File.WriteAllBytesAsync(seedPath, Encoding.ASCII.GetBytes("ABCDEFGH"));
+
+        var manifest = await FileManifest.CreateFromFileAsync(seedPath, pieceLength: 8, blockLength: 4);
+        using var storage = new FileStorage(destPath, manifest, isSeed: false);
+
+        // 1. Ghi đúng và Verify lần đầu -> IsPieceVerified = true
+        await storage.WriteBlockAsync(0, 0, Encoding.ASCII.GetBytes("ABCD"));
+        await storage.WriteBlockAsync(0, 1, Encoding.ASCII.GetBytes("EFGH"));
+        Assert.Equal(StorageStatus.Verified, (await storage.VerifyPieceAsync(0)).Status);
+        Assert.True(storage.IsPieceVerified(0));
+
+        // 2. Ghi đè lại 1 block vào piece đã Verified -> Cờ Verified phải bị xóa ngay lập tức (trước khi Verify lại)
+        await storage.WriteBlockAsync(0, 1, Encoding.ASCII.GetBytes("EFGZ")); // Ghi dữ liệu sai
+        Assert.False(storage.IsPieceVerified(0));
+
+        // 3. Nếu gọi VerifyPieceAsync với dữ liệu sai -> báo HashMismatch và giữ Verified = false
+        Assert.Equal(StorageStatus.HashMismatch, (await storage.VerifyPieceAsync(0)).Status);
+        Assert.False(storage.IsPieceVerified(0));
+
+        // 4. Ghi lại đầy đủ dữ liệu đúng và Verify -> Bật lại Verified = true
+        await storage.WriteBlockAsync(0, 0, Encoding.ASCII.GetBytes("ABCD"));
+        await storage.WriteBlockAsync(0, 1, Encoding.ASCII.GetBytes("EFGH"));
+        Assert.False(storage.IsPieceVerified(0)); // Trước khi gọi VerifyPieceAsync vẫn là false
+        Assert.Equal(StorageStatus.Verified, (await storage.VerifyPieceAsync(0)).Status);
+        Assert.True(storage.IsPieceVerified(0));
     }
 
     public void Dispose()
