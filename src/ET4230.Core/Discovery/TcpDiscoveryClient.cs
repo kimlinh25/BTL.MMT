@@ -4,7 +4,7 @@ using System.IO;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using ET4230.Core.Protocol;
+using ET4230.Core.Transport;
 
 namespace ET4230.Core.Discovery;
 
@@ -72,14 +72,14 @@ public sealed class TcpDiscoveryClient : IDiscoveryClient
 
         if (response.Header.Type == TrackerProtocol.TypeError)
         {
-            if (TrackerProtocol.TryDeserializeJson<ErrorPayload>(response.Payload, out var err) &&
+            if (TrackerProtocol.TryDeserializeJson<ErrorPayload>(response.Payload.Span, out var err) &&
                 err is not null &&
                 string.Equals(err.Code, TrackerProtocol.ErrorPeerNotFound, StringComparison.Ordinal))
             {
                 return false;
             }
 
-            ThrowTrackerError(response.Payload);
+            ThrowTrackerError(response.Payload.Span);
         }
 
         EnsureAckResponse(response);
@@ -97,12 +97,12 @@ public sealed class TcpDiscoveryClient : IDiscoveryClient
             .ConfigureAwait(false);
 
         if (response.Header.Type == TrackerProtocol.TypeError)
-            ThrowTrackerError(response.Payload);
+            ThrowTrackerError(response.Payload.Span);
 
         if (response.Header.Type != TrackerProtocol.TypePeerList)
             throw new InvalidDataException($"Phản hồi không đúng type PEER_LIST (nhận type {response.Header.Type}).");
 
-        if (!TrackerProtocol.TryDeserializeJson<PeerListPayload>(response.Payload, out var peerList) ||
+        if (!TrackerProtocol.TryDeserializeJson<PeerListPayload>(response.Payload.Span, out var peerList) ||
             peerList is null ||
             peerList.Peers is null)
         {
@@ -156,7 +156,7 @@ public sealed class TcpDiscoveryClient : IDiscoveryClient
         return result;
     }
 
-    private async Task<FrameMessage> SendRequestAsync(
+    private async Task<Frame> SendRequestAsync(
         byte messageType,
         byte[] payload,
         CancellationToken cancellationToken)
@@ -169,20 +169,13 @@ public sealed class TcpDiscoveryClient : IDiscoveryClient
         if (requestId == 0)
             requestId = Interlocked.Increment(ref _nextRequestId);
 
-        var header = new FrameHeader(
-            TrackerProtocol.Version,
-            messageType,
-            TrackerProtocol.DefaultFlags,
-            requestId,
-            (uint)payload.Length);
-
         using var client = new TcpClient();
         await client.ConnectAsync(_options.TrackerHost.Trim(), _options.TrackerPort, ct).ConfigureAwait(false);
 
         await using var stream = client.GetStream();
-        await FrameStreamHelper.WriteFrameAsync(stream, header, payload, ct).ConfigureAwait(false);
+        await FrameTransport.WriteAsync(stream, messageType, requestId, payload, ct).ConfigureAwait(false);
 
-        var response = await FrameStreamHelper.ReadFrameAsync(
+        var response = await FrameTransport.ReadAsync(
             stream,
             TrackerProtocol.MaxControlJsonBytes,
             ct).ConfigureAwait(false);
@@ -196,19 +189,19 @@ public sealed class TcpDiscoveryClient : IDiscoveryClient
         return response;
     }
 
-    private static void EnsureAckResponse(FrameMessage response)
+    private static void EnsureAckResponse(Frame response)
     {
         if (response.Header.Type == TrackerProtocol.TypeError)
-            ThrowTrackerError(response.Payload);
+            ThrowTrackerError(response.Payload.Span);
 
         if (response.Header.Type != TrackerProtocol.TypeAck)
             throw new InvalidDataException($"Phản hồi không đúng type ACK (nhận type {response.Header.Type}).");
 
-        if (!TrackerProtocol.TryDeserializeJson<AckPayload>(response.Payload, out var ack) || ack is null || !ack.Ok)
+        if (!TrackerProtocol.TryDeserializeJson<AckPayload>(response.Payload.Span, out var ack) || ack is null || !ack.Ok)
             throw new InvalidDataException("Payload ACK không hợp lệ.");
     }
 
-    private static void ThrowTrackerError(byte[] errorPayload)
+    private static void ThrowTrackerError(ReadOnlySpan<byte> errorPayload)
     {
         if (TrackerProtocol.TryDeserializeJson<ErrorPayload>(errorPayload, out var err) && err is not null)
             throw new TrackerRequestException(err.Code, err.Message);

@@ -1,5 +1,11 @@
 # Trạng thái hiện tại ET4230
 
+## W03 — Luồng TCP một nguồn, 22/11/2026
+
+W03 trên repo tạm [kimlinh25/BTL.MMT](https://github.com/kimlinh25/BTL.MMT) gồm transport/seed (#26), manifest/storage (#27), receiver tuần tự (#28), tracker/discovery (#29), và CLI tích hợp (#30) tiếp nối khung W03 của Tú. Tracker và peer đọc frame qua cùng lớp transport v1. Seed chỉ phục vụ block đã xác minh. Downloader công bố tệp đích sau khi xác minh toàn tệp.
+
+Có [hướng dẫn chạy lại](../../README.md#chạy-lại-w03-trên-một-máy) và kiểm tra trong CI Windows. Kiểm thử CLI dùng ba tiến trình TCP loopback, bao gồm tệp 196.611 byte có block cuối lẻ, tệp rỗng, heartbeat qua một khoảng TTL và giữ nguyên tệp đích có sẵn. Xem bằng chứng chạy và bước W04 ở [issue tích hợp #24](https://github.com/kimlinh25/BTL.MMT/issues/24).
+
 ## Sửa đường dẫn kiểm tra bootstrap — 08/11/2026
 
 Linh yêu cầu khắc phục workflow thất bại sau merge PR#15. Log run42453787595 trên main0563fba cho thấy checker dừng với39lỗi vì memory đã chuyển sang `.github/agent/` nhưng required paths và relative links còn vị trí cũ. Đã cập nhật checker, README/mục lục, AGENTS và các link đi từ memory ra root theo vị trí thực.

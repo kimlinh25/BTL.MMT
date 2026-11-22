@@ -1,19 +1,101 @@
-// Bootstrap entry point only. Networking is implemented by the team in later milestones.
-if (args.Length == 1 && args[0] == "--version")
-{
-    Console.WriteLine("ET4230.P2P 0.1.0-bootstrap");
-    return 0;
-}
+using System.Net.Sockets;
+using System.Text.Json;
+using ET4230.Cli;
+using ET4230.Core.Discovery;
 
-if (args.Length == 0 || (args.Length == 1 && args[0] is "--help" or "-h"))
-{
-    Console.WriteLine("ET4230 De 14 - P2P C# project bootstrap");
-    Console.WriteLine("Members: Linh, Minh, Cuong, Quan, Tu");
-    Console.WriteLine("Available: --help, --version");
-    Console.WriteLine("Tracker, peer, transfer and resume are not implemented yet.");
-    Console.WriteLine("Start with README.md.");
-    return 0;
-}
+return await RunAsync(args);
 
-Console.Error.WriteLine("Unsupported command in bootstrap. Run with --help.");
-return 2;
+static async Task<int> RunAsync(string[] arguments)
+{
+    if (arguments.Length == 0 || arguments is ["--help"] or ["-h"])
+    {
+        Console.WriteLine("ET4230 P2P — truyền tệp TCP một nguồn");
+        Console.WriteLine("Các mode: tracker, seed, download.");
+        Console.WriteLine("Cách dùng: dotnet run --project src/ET4230.Cli -- <mode> --config <tệp-json>");
+        Console.WriteLine("Xem <mode> --help, --version và hướng dẫn chạy W03 trong README.md.");
+        return 0;
+    }
+
+    if (arguments is ["--version"])
+    {
+        Console.WriteLine("ET4230.P2P 0.1.0-w03");
+        return 0;
+    }
+
+    string mode = arguments[0];
+    if (mode is not ("tracker" or "seed" or "download"))
+    {
+        Console.Error.WriteLine($"Mode không được hỗ trợ: '{mode}'. Dùng --help để xem các mode.");
+        return 2;
+    }
+
+    string usage = $"Cách dùng: dotnet run --project src/ET4230.Cli -- {mode} --config <tệp-json>";
+    if (arguments is [_, "--help" or "-h"])
+    {
+        Console.WriteLine(usage);
+        Console.WriteLine(mode switch
+        {
+            "tracker" => "Lắng nghe tại tracker.bindHost:port.",
+            "seed" => "Xác minh file.sourcePath, tạo hoặc đọc manifest và đăng ký seed với tracker.",
+            _ => "Đọc manifest tin cậy, tìm một seed qua tracker và tải tới file.outputPath."
+        });
+        Console.WriteLine("Xem cấu hình mẫu trong README.md.");
+        return 0;
+    }
+
+    if (arguments is not [_, "--config", var configPath])
+    {
+        Console.Error.WriteLine(usage);
+        return 2;
+    }
+
+    using var shutdown = new CancellationTokenSource();
+    ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        shutdown.Cancel();
+    };
+    Console.CancelKeyPress += onCancel;
+    try
+    {
+        W03Config config = await W03Config.LoadAsync(configPath, shutdown.Token);
+        switch (mode)
+        {
+            case "tracker":
+                await W03Transfer.RunTrackerAsync(config, shutdown.Token);
+                break;
+            case "seed":
+                await W03Transfer.RunSeedAsync(config, shutdown.Token);
+                break;
+            case "download":
+                await W03Transfer.RunDownloadAsync(config, shutdown.Token);
+                break;
+        }
+        return 0;
+    }
+    catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
+    {
+        Console.Error.WriteLine($"Đã dừng {mode}.");
+        return 130;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine($"{mode}: hết thời gian chờ tracker.");
+        return 1;
+    }
+    catch (Exception error) when (error is ArgumentException or JsonException)
+    {
+        Console.Error.WriteLine($"{mode}: cấu hình không hợp lệ. {error.Message}");
+        return 2;
+    }
+    catch (Exception error) when (error is IOException or InvalidDataException or
+        UnauthorizedAccessException or SocketException or TrackerRequestException)
+    {
+        Console.Error.WriteLine($"{mode}: {error.Message}");
+        return 1;
+    }
+    finally
+    {
+        Console.CancelKeyPress -= onCancel;
+    }
+}
