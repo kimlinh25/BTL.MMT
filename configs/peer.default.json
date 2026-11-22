@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "planned configuration; not consumed by bootstrap CLI",
+  "status": "W03 uses tracker, peer and core transfer settings, with file paths supplied by the user",
   "tracker": { "host": "127.0.0.1", "port": 42300, "heartbeatSeconds": 5, "ttlSeconds": 20 },
   "peer": { "listenHost": "127.0.0.1", "advertiseHost": "127.0.0.1", "port": 42301 },
   "transfer": { "pieceSizeBytes": 1048576, "blockSizeBytes": 16384, "maxPayloadBytes": 1048576, "maxControlBytes": 65536, "requestTimeoutSeconds": 15, "maxRetries": 3 },
