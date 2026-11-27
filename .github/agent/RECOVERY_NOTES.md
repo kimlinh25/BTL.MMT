@@ -1,5 +1,9 @@
 # Điểm tiếp tục
 
+## 27/11/2026 — Hoàn thiện code P2P và runner
+
+Code mới ở `C:/Users/KimSakota/.codex/tmp/et4230-p2p-complete-20261127`, nhánh `codex/p2p-complete`. Mở README tại worktree để chạy ba peer hoặc so sánh client–server/P2P. Dữ liệu độ tin cậy: `results/raw/20261127-155343-071c2bde` (proof) và `results/raw/20261127-155216-ba53af7b` (smoke). Tiếp tục nghiệm thu trên hai máy và chạy ma trận đúng cấu hình đo. Giữ bộ dữ liệu bắt gói riêng cho LAN. Chưa có xác nhận resume sau khi tắt tiến trình hoặc tích hợp runtime Vst thuộc phạm vi duyệt. Không đánh dấu #31/#32 đạt LAN khi chỉ chạy loopback.
+
 ## Sửa đường dẫn kiểm tra bootstrap — 08/11/2026
 
 Linh yêu cầu khắc phục workflow thất bại sau merge PR#15. Log run42453787595 trên main0563fba cho thấy checker dừng với39lỗi vì memory đã chuyển sang `.github/agent/` nhưng required paths và relative links còn vị trí cũ. Đã cập nhật checker, README/mục lục, AGENTS và các link đi từ memory ra root theo vị trí thực.

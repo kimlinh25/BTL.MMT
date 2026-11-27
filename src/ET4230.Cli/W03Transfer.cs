@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Diagnostics;
+using System.Globalization;
 using ET4230.Core.Discovery;
 using ET4230.Core.Scheduling;
 using ET4230.Core.Storage;
@@ -21,6 +23,7 @@ internal static class W03Transfer
 
     public static async Task RunSeedAsync(W03Config config, CancellationToken ct)
     {
+        config.ValidateUpload();
         Guid peerId = Guid.NewGuid();
         IPEndPoint endpoint = config.SeedEndpoint();
         var discovery = new TcpDiscoveryClient(config.DiscoveryOptions(peerId));
@@ -43,21 +46,19 @@ internal static class W03Transfer
         if (createManifest)
             await WriteManifestAsync(manifestPath, manifest, ct);
 
-        using var listener = new TcpListener(endpoint);
-        listener.Start();
-        await discovery.RegisterAsync(manifest.FileId, ct);
-        Console.WriteLine($"SEED_READY {config.Peer.AdvertiseHost}:{endpoint.Port} SHA256={manifest.FileId} manifest={manifestPath}");
-
-        using var session = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        Task serve = ServeAsync(listener, peerId, new FileSeedSource(storage), session.Token);
-        Task heartbeat = discovery.RunHeartbeatLoopAsync(manifest.FileId, session.Token);
-        await Task.WhenAny(serve, heartbeat);
-        session.Cancel();
-        await Task.WhenAll(serve, heartbeat);
+        await ShareAsync(config, endpoint, peerId, discovery, storage, Task.CompletedTask,
+            $"SEED_READY {config.Peer.AdvertiseHost}:{endpoint.Port} SHA256={manifest.FileId} manifest={manifestPath}", ct);
     }
 
     public static async Task RunDownloadAsync(W03Config config, CancellationToken ct)
+        => await RunReceiverAsync(config, share: false, ct);
+
+    public static async Task RunPeerAsync(W03Config config, CancellationToken ct)
+        => await RunReceiverAsync(config, share: true, ct);
+
+    private static async Task RunReceiverAsync(W03Config config, bool share, CancellationToken ct)
     {
+        var elapsed = Stopwatch.StartNew();
         string manifestPath = config.ResolvePath(config.File.ManifestPath, "file.manifestPath");
         string outputPath = config.ResolvePath(config.File.OutputPath, "file.outputPath");
         if (File.Exists(outputPath) || Directory.Exists(outputPath))
@@ -67,19 +68,58 @@ internal static class W03Transfer
         ValidateWireLayout(manifest);
         Guid peerId = Guid.NewGuid();
         var discovery = new TcpDiscoveryClient(config.DiscoveryOptions(peerId));
-        var peers = await discovery.ListPeersAsync(manifest.FileId, ct);
-        if (peers.Count == 0)
-            throw new IOException($"Tracker chưa có seed cho SHA-256 {manifest.FileId}.");
+        IPEndPoint? endpoint = share ? config.SeedEndpoint() : null;
+        SwarmOptions? options = share ? config.SwarmOptions() : null;
+        if (share)
+            config.ValidateUpload();
 
-        PeerEndpoint source = peers[0];
-        Console.WriteLine($"DOWNLOAD_SOURCE {source.Host}:{source.Port}");
         string partialPath = CreateTemporaryPath(outputPath);
+        int retries = 0;
+        Console.WriteLine($"RECEIVER_STARTED peerId={peerId} sharing={share}");
         try
         {
             using (var storage = new FileStorage(partialPath, manifest))
             {
-                ReceiverResult result = await SequentialReceiver.DownloadAsync(
-                    source.Host, source.Port, peerId, storage, config.RequestTimeout(), ct);
+                ReceiverResult result;
+                if (endpoint is not null)
+                {
+                    using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var firstPiece = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    Task uploading = ShareAsync(config, endpoint, peerId, discovery, storage, firstPiece.Task,
+                        $"PEER_READY {config.Peer.AdvertiseHost}:{endpoint.Port} SHA256={manifest.FileId}", lifetime.Token);
+                    Task<ReceiverResult> downloading = SequentialReceiver.DownloadFromPeersAsync(
+                        discovery, peerId, storage, options!, (piece, _) =>
+                        {
+                            Console.WriteLine($"PIECE_VERIFIED peerId={peerId} source={piece.SourcePeerId} piece={piece.PieceIndex} bytes={piece.Bytes} verified={piece.VerifiedPieces}/{storage.Layout.PieceCount}");
+                            firstPiece.TrySetResult();
+                            return ValueTask.CompletedTask;
+                        }, detail =>
+                        {
+                            retries++;
+                            Console.Error.WriteLine($"DOWNLOAD_RETRY peerId={peerId} {detail}");
+                        }, lifetime.Token);
+                    try
+                    {
+                        if (await Task.WhenAny(downloading, uploading) == uploading)
+                            await uploading;
+                        result = await downloading;
+                    }
+                    finally
+                    {
+                        await lifetime.CancelAsync();
+                        await JoinAfterCancelAsync(Task.WhenAll(downloading, uploading), lifetime.Token);
+                    }
+                }
+                else
+                {
+                    var peers = await discovery.ListPeersAsync(manifest.FileId, ct);
+                    if (peers.Count == 0)
+                        throw new IOException($"Tracker chưa có seed cho SHA-256 {manifest.FileId}.");
+                    PeerEndpoint source = peers[0];
+                    Console.WriteLine($"DOWNLOAD_SOURCE {source.Host}:{source.Port}");
+                    result = await SequentialReceiver.DownloadAsync(
+                        source.Host, source.Port, peerId, storage, config.RequestTimeout(), ct);
+                }
                 if (result.Status != ReceiverStatus.Completed)
                 {
                     throw new IOException(
@@ -90,6 +130,16 @@ internal static class W03Transfer
             ct.ThrowIfCancellationRequested();
             File.Move(partialPath, outputPath);
             Console.WriteLine($"DOWNLOAD_OK SHA256={manifest.FileId} bytes={manifest.FileSizeBytes} path={outputPath}");
+            Console.WriteLine($"DOWNLOAD_METRICS peerId={peerId} seconds={elapsed.Elapsed.TotalSeconds.ToString("F6", CultureInfo.InvariantCulture)} retries={retries}");
+
+            if (endpoint is not null && config.Transfer.ShareAfterCompletionSeconds > 0 && manifest.FileSizeBytes > 0)
+            {
+                using var completedFile = new FileStorage(outputPath, manifest, isSeed: true);
+                using var shareFor = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                shareFor.CancelAfter(TimeSpan.FromSeconds(config.Transfer.ShareAfterCompletionSeconds));
+                await JoinAfterCancelAsync(ShareAsync(config, endpoint, peerId, discovery, completedFile,
+                    Task.CompletedTask, $"PEER_COMPLETE_READY {endpoint}", shareFor.Token), shareFor.Token);
+            }
         }
         finally
         {
@@ -97,22 +147,45 @@ internal static class W03Transfer
         }
     }
 
-    private static async Task ServeAsync(
-        TcpListener listener, Guid peerId, ISeedSource source, CancellationToken ct)
+    private static async Task ShareAsync(
+        W03Config config, IPEndPoint endpoint, Guid peerId, TcpDiscoveryClient discovery,
+        FileStorage storage, Task readyToAdvertise, string readyMessage, CancellationToken ct)
     {
-        while (true)
+        using var listener = new TcpListener(endpoint);
+        listener.Start(config.Peer.MaxUploadSessions);
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var source = new PeerUpload(new FileSeedSource(storage), config.Strategy.ApplicationUploadLimitMbps);
+        Task serving = PeerUpload.ServeAsync(listener, peerId, source, config.Peer.MaxUploadSessions,
+            block => Console.WriteLine($"UPLOAD_BLOCK peerId={peerId} piece={block.PieceIndex} offset={block.OffsetInPiece} bytes={block.Length}"),
+            lifetime.Token);
+        Task? heartbeat = null;
+        try
         {
-            using TcpClient client = await listener.AcceptTcpClientAsync(ct);
-            try
-            {
-                using NetworkStream stream = client.GetStream();
-                await SeedSession.RunAsync(stream, peerId, source, ct);
-            }
-            catch (Exception error) when (error is IOException or InvalidDataException or SocketException)
-            {
-                Console.Error.WriteLine($"Đóng phiên seed: {error.Message}");
-            }
+            Task ready = readyToAdvertise.WaitAsync(lifetime.Token);
+            if (await Task.WhenAny(ready, serving) == serving)
+                await serving;
+            await ready;
+            await discovery.RegisterAsync(storage.Manifest.FileId, lifetime.Token);
+            Console.WriteLine($"{readyMessage} peerId={peerId}");
+            heartbeat = discovery.RunHeartbeatLoopAsync(storage.Manifest.FileId, lifetime.Token);
+            Task finished = await Task.WhenAny(serving, heartbeat);
+            await finished;
         }
+        finally
+        {
+            await lifetime.CancelAsync();
+            Task[] jobs = heartbeat is null ? [serving] : [serving, heartbeat];
+            await JoinAfterCancelAsync(Task.WhenAll(jobs), lifetime.Token);
+        }
+    }
+
+    private static async Task JoinAfterCancelAsync(Task task, CancellationToken token)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
     private static async Task<FileManifest> ReadManifestAsync(string path, CancellationToken ct) =>

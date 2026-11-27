@@ -22,6 +22,9 @@ public interface ISeedSource
     int PieceCount { get; }
     bool IsVerified(int pieceIndex);
 
+    bool[] SnapshotVerifiedPieces() =>
+        Enumerable.Range(0, PieceCount).Select(IsVerified).ToArray();
+
     ValueTask<BlockReadResult> ReadBlockAsync(
         BlockRequest request, CancellationToken cancellationToken);
 }
@@ -39,15 +42,22 @@ public static class SeedSession
     private const int BlockFieldsSize = 12;
     private const int MaxPayloadSize = 1024 * 1024;
 
+    public static Task RunAsync(
+        Stream stream, Guid localPeerId, ISeedSource source,
+        CancellationToken cancellationToken = default) =>
+        RunAsync(stream, localPeerId, source, cancellationToken, null, null);
+
     public static async Task RunAsync(
         Stream stream, Guid localPeerId, ISeedSource source,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken,
+        Action<BlockRequest>? onBlockSent,
+        TimeSpan? idleTimeout)
     {
         if (localPeerId == Guid.Empty || !IsFileId(source.FileId))
             throw new ArgumentException("Seed cần peerId và fileId hợp lệ.");
 
         // Đọc frame đầu tiên từ stream
-        Frame? first = await FrameTransport.ReadAsync(stream, cancellationToken);
+        Frame? first = await ReadAsync(stream, idleTimeout, cancellationToken);
         if (first is null) 
             return;
 
@@ -67,7 +77,7 @@ public static class SeedSession
             stream, HelloOk, first.Header.RequestId, helloOk, cancellationToken);
         await FrameTransport.WriteAsync(stream, Bitfield, 0, bitmap, cancellationToken);
 
-        while (await FrameTransport.ReadAsync(stream, cancellationToken) is { } frame)
+        while (await ReadAsync(stream, idleTimeout, cancellationToken) is { } frame)
         {
             if (frame.Header.Type == Cancel)
                 continue;
@@ -83,12 +93,13 @@ public static class SeedSession
             if (frame.Header.Type != RequestBlock)
                 throw new InvalidDataException("Message không phù hợp với session seed W03.");
 
-            await ServeBlockAsync(stream, source, frame, cancellationToken);
+            await ServeBlockAsync(stream, source, frame, cancellationToken, onBlockSent);
         }
     }
 
     private static async Task ServeBlockAsync(
-        Stream stream, ISeedSource source, Frame frame, CancellationToken cancellationToken)
+        Stream stream, ISeedSource source, Frame frame, CancellationToken cancellationToken,
+        Action<BlockRequest>? onBlockSent)
     {
         BlockRequest request = ReadBlockRequest(frame.Payload.Span);
         uint requestId = frame.Header.RequestId;
@@ -125,6 +136,17 @@ public static class SeedSession
         frame.Payload.CopyTo(blockPayload);
         result.Data.CopyTo(blockPayload.AsMemory(BlockFieldsSize));
         await FrameTransport.WriteAsync(stream, Block, requestId, blockPayload, cancellationToken);
+        onBlockSent?.Invoke(request);
+    }
+
+    private static async ValueTask<Frame?> ReadAsync(Stream stream, TimeSpan? idleTimeout, CancellationToken ct)
+    {
+        if (idleTimeout is null)
+            return await FrameTransport.ReadAsync(stream, ct);
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(idleTimeout.Value);
+        return await FrameTransport.ReadAsync(stream, deadline.Token);
     }
 
     private static BlockRequest ReadBlockRequest(ReadOnlySpan<byte> payload) => new(
@@ -163,10 +185,13 @@ public static class SeedSession
         if (length > MaxPayloadSize)
             throw new ArgumentException("BITFIELD vượt giới hạn v1.", nameof(source));
 
+        bool[] verified = source.SnapshotVerifiedPieces();
+        if (verified.Length != count)
+            throw new InvalidDataException("Snapshot Verified không khớp số piece.");
         var bitmap = new byte[(int)length];
         for (int i = 0; i < count; i++)
         {
-            if (source.IsVerified(i))
+            if (verified[i])
                 bitmap[i / 8] |= (byte)(1 << (7 - i % 8));
         }
 

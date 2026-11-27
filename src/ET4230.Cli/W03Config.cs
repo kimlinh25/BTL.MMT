@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using ET4230.Core.Discovery;
+using ET4230.Core.Scheduling;
 
 namespace ET4230.Cli;
 
@@ -12,6 +13,7 @@ internal sealed record W03Config
     public TrackerSettings Tracker { get; init; } = new();
     public PeerSettings Peer { get; init; } = new();
     public TransferSettings Transfer { get; init; } = new();
+    public PeerStrategy Strategy { get; init; } = new();
     public FileSettings File { get; init; } = new();
     private string ConfigDirectory { get; init; } = "";
 
@@ -21,7 +23,7 @@ internal sealed record W03Config
         await using var stream = System.IO.File.OpenRead(fullPath);
         var config = await JsonSerializer.DeserializeAsync<W03Config>(stream, JsonOptions, ct);
         if (config is not { SchemaVersion: 1, Tracker: not null, Peer: not null,
-            Transfer: not null, File: not null })
+            Transfer: not null, Strategy: not null, File: not null })
         {
             throw new ArgumentException("Cần JSON schemaVersion 1 và các mục cấu hình phải là object.");
         }
@@ -66,6 +68,26 @@ internal sealed record W03Config
     public TimeSpan RequestTimeout() =>
         Seconds(Transfer.RequestTimeoutSeconds, "transfer.requestTimeoutSeconds");
 
+    public void ValidateUpload()
+    {
+        if (Peer.MaxUploadSessions is < 1 or > 16)
+            throw new ArgumentException("peer.maxUploadSessions phải thuộc 1..16.");
+        double limit = Strategy.ApplicationUploadLimitMbps;
+        if (!double.IsFinite(limit) || limit < 0 || limit > 100_000 || (limit > 0 && limit < 0.01))
+            throw new ArgumentException("strategy.applicationUploadLimitMbps phải là 0 hoặc thuộc 0.01..100000.");
+    }
+
+    public SwarmOptions SwarmOptions()
+    {
+        if (Strategy.PieceSelection is not ("sequential" or "rarest-first") ||
+            Transfer.DiscoveryIntervalMilliseconds is < 50 or > 10000 ||
+            Transfer.ShareAfterCompletionSeconds is < 0 or > 3600)
+            throw new ArgumentException("Chiến lược chọn piece hoặc cấu hình discovery/upload không hợp lệ.");
+
+        return new(RequestTimeout(), TimeSpan.FromMilliseconds(Transfer.DiscoveryIntervalMilliseconds),
+            Transfer.MaxSources, Transfer.MaxRetries, Strategy.PieceSelection == "rarest-first");
+    }
+
     public void ValidateNewManifestLayout()
     {
         if (Transfer.BlockSizeBytes is <= 0 or > 1024 * 1024 - 12)
@@ -105,6 +127,7 @@ internal sealed record W03Config
         public string ListenHost { get; init; } = "127.0.0.1";
         public string AdvertiseHost { get; init; } = "127.0.0.1";
         public int Port { get; init; } = 42301;
+        public int MaxUploadSessions { get; init; } = 8;
     }
 
     public sealed record TransferSettings
@@ -112,6 +135,16 @@ internal sealed record W03Config
         public int PieceSizeBytes { get; init; } = 1048576;
         public int BlockSizeBytes { get; init; } = 16384;
         public int RequestTimeoutSeconds { get; init; } = 15;
+        public int DiscoveryIntervalMilliseconds { get; init; } = 250;
+        public int MaxSources { get; init; } = 8;
+        public int MaxRetries { get; init; } = 3;
+        public int ShareAfterCompletionSeconds { get; init; }
+    }
+
+    public sealed record PeerStrategy
+    {
+        public string PieceSelection { get; init; } = "sequential";
+        public double ApplicationUploadLimitMbps { get; init; }
     }
 
     public sealed record FileSettings

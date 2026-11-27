@@ -128,34 +128,29 @@ public sealed class FileManifest
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("Đường dẫn tệp không được rỗng.", nameof(filePath));
 
-        var fileInfo = new FileInfo(filePath);
-        if (!fileInfo.Exists)
-            throw new FileNotFoundException("Không tìm thấy tệp nguồn để tạo Manifest.", filePath);
-
-        long fileSize = fileInfo.Length;
+        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        long fileSize = fileStream.Length;
         var layout = new PieceLayout(fileSize, pieceLength, blockLength);
         var pieceHashes = new List<string>(layout.PieceCount);
 
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var fullFileHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var pieceHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[Math.Min(pieceLength, 64 * 1024)];
 
         for (int p = 0; p < layout.PieceCount; p++)
         {
-            int pLen = layout.GetPieceLength(p);
-            byte[] buffer = new byte[pLen];
-            int totalRead = 0;
-
-            while (totalRead < pLen)
+            int remaining = layout.GetPieceLength(p);
+            while (remaining > 0)
             {
-                int read = await fileStream.ReadAsync(buffer.AsMemory(totalRead, pLen - totalRead), ct);
+                int read = await fileStream.ReadAsync(buffer.AsMemory(0, Math.Min(remaining, buffer.Length)), ct);
                 if (read == 0)
                     throw new EndOfStreamException($"Tệp bị cắt cụt bất ngờ khi đọc piece {p}.");
-                totalRead += read;
+                pieceHasher.AppendData(buffer.AsSpan(0, read));
+                fullFileHasher.AppendData(buffer.AsSpan(0, read));
+                remaining -= read;
             }
 
-            fullFileHasher.AppendData(buffer);
-            byte[] pieceHashBytes = SHA256.HashData(buffer);
-            pieceHashes.Add(Convert.ToHexString(pieceHashBytes).ToLowerInvariant());
+            pieceHashes.Add(Convert.ToHexStringLower(pieceHasher.GetHashAndReset()));
         }
 
         byte[] fullHashBytes = fullFileHasher.GetHashAndReset();
@@ -165,7 +160,7 @@ public sealed class FileManifest
         {
             Version = 1,
             FileId = fileId,
-            DisplayName = fileInfo.Name,
+            DisplayName = Path.GetFileName(filePath),
             FileSizeBytes = fileSize,
             PieceSizeBytes = pieceLength,
             BlockSizeBytes = blockLength,

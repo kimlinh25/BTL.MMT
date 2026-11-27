@@ -24,11 +24,13 @@ public sealed record StorageResult(
 
 public sealed class FileStorage : IDisposable
 {
+    private const int HashBufferSize = 64 * 1024;
     private readonly string _targetFilePath;
     private readonly FileManifest _manifest;
     private readonly PieceLayout _layout;
     private readonly FileStream _stream;
     private readonly SemaphoreSlim _writerLock = new(1, 1);
+    private readonly Lock _stateLock = new();
 
     private readonly BitArray[] _writtenBlocksPerPiece;
     private readonly BitArray _verifiedPieces;
@@ -72,15 +74,18 @@ public sealed class FileStorage : IDisposable
         var fileMode = isSeed ? FileMode.Open : FileMode.OpenOrCreate;
         var fileAccess = isSeed ? FileAccess.Read : FileAccess.ReadWrite;
 
-        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.Read); ;
-
-        if (isSeed)
+        _stream = new FileStream(_targetFilePath, fileMode, fileAccess, FileShare.Read);
+        try
         {
-            VerifyExistingSeedPieces();
+            if (isSeed)
+                VerifyExistingSeedPieces();
+            else if (_stream.Length != _layout.FileSize)
+                _stream.SetLength(_layout.FileSize);
         }
-        else if (_stream.Length != _layout.FileSize)
+        catch
         {
-            _stream.SetLength(_layout.FileSize);
+            _stream.Dispose();
+            throw;
         }
     }
 
@@ -95,25 +100,24 @@ public sealed class FileStorage : IDisposable
             return;
         }
 
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[Math.Min(_layout.PieceLength, HashBufferSize)];
         for (int p = 0; p < _layout.PieceCount; p++)
         {
             int pLen = _layout.GetPieceLength(p);
             long pieceOffset = (long)p * _layout.PieceLength;
-            byte[] pieceBuffer = new byte[pLen];
-
             _stream.Seek(pieceOffset, SeekOrigin.Begin);
-            int totalRead = 0;
-            while (totalRead < pLen)
+            int remaining = pLen;
+            while (remaining > 0)
             {
-                int read = _stream.Read(pieceBuffer, totalRead, pLen - totalRead);
-                if (read == 0) break;
-                totalRead += read;
+                int read = _stream.Read(buffer, 0, Math.Min(remaining, buffer.Length));
+                if (read == 0)
+                    return;
+                hash.AppendData(buffer.AsSpan(0, read));
+                remaining -= read;
             }
 
-            if (totalRead != pLen)
-                continue;
-
-            string actualHash = Convert.ToHexString(SHA256.HashData(pieceBuffer)).ToLowerInvariant();
+            string actualHash = Convert.ToHexStringLower(hash.GetHashAndReset());
             string expectedHash = _manifest.PieceHashes[p];
 
             if (string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
@@ -149,7 +153,7 @@ public sealed class FileStorage : IDisposable
         try
         {
             // Không phục vụ block nếu piece hiện tại chưa được xác minh SHA-256 (Verified)
-            if (!_verifiedPieces[pieceIndex])
+            if (!IsPieceVerified(pieceIndex))
             {
                 return (new StorageResult(
                     StorageStatus.HashMismatch,
@@ -219,14 +223,18 @@ public sealed class FileStorage : IDisposable
         try
         {
             // Xóa cờ xác minh của piece trước khi ghi đè; chỉ bật lại khi gọi VerifyPieceAsync và hash khớp
-            _verifiedPieces[pieceIndex] = false;
-            _writtenBlocksPerPiece[pieceIndex][blockIndex] = false;
+            lock (_stateLock)
+            {
+                _verifiedPieces[pieceIndex] = false;
+                _writtenBlocksPerPiece[pieceIndex][blockIndex] = false;
+            }
 
             _stream.Seek(range.fileOffset, SeekOrigin.Begin);
             await _stream.WriteAsync(data, ct);
             await _stream.FlushAsync(ct);
 
-            _writtenBlocksPerPiece[pieceIndex][blockIndex] = true;
+            lock (_stateLock)
+                _writtenBlocksPerPiece[pieceIndex][blockIndex] = true;
             return new StorageResult(StorageStatus.Ok);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -247,19 +255,31 @@ public sealed class FileStorage : IDisposable
         if (pieceIndex < 0 || pieceIndex >= _layout.PieceCount)
             throw new ArgumentOutOfRangeException(nameof(pieceIndex));
 
-        var blocks = _writtenBlocksPerPiece[pieceIndex];
-        for (int b = 0; b < blocks.Count; b++)
+        lock (_stateLock)
         {
-            if (!blocks[b]) return false;
+            var blocks = _writtenBlocksPerPiece[pieceIndex];
+            for (int b = 0; b < blocks.Count; b++)
+            {
+                if (!blocks[b]) return false;
+            }
+            return true;
         }
-        return true;
     }
 
     public bool IsPieceVerified(int pieceIndex)
     {
         if (pieceIndex < 0 || pieceIndex >= _layout.PieceCount)
             throw new ArgumentOutOfRangeException(nameof(pieceIndex));
-        return _verifiedPieces[pieceIndex];
+        lock (_stateLock)
+            return _verifiedPieces[pieceIndex];
+    }
+
+    public bool[] SnapshotVerifiedPieces()
+    {
+        var snapshot = new bool[_layout.PieceCount];
+        lock (_stateLock)
+            _verifiedPieces.CopyTo(snapshot, 0);
+        return snapshot;
     }
 
     /// <summary>
@@ -282,8 +302,6 @@ public sealed class FileStorage : IDisposable
         await _writerLock.WaitAsync(ct);
         try
         {
-            _verifiedPieces[pieceIndex] = false;
-
             if (!IsPieceFullyWritten(pieceIndex))
             {
                 return new StorageResult(
@@ -292,29 +310,34 @@ public sealed class FileStorage : IDisposable
             }
 
             long pieceOffset = (long)pieceIndex * _layout.PieceLength;
-            byte[] pieceBuffer = new byte[pLen];
+            byte[] buffer = new byte[Math.Min(pLen, HashBufferSize)];
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
             _stream.Seek(pieceOffset, SeekOrigin.Begin);
-            int totalRead = 0;
-            while (totalRead < pLen)
+            int remaining = pLen;
+            while (remaining > 0)
             {
-                int read = await _stream.ReadAsync(pieceBuffer.AsMemory(totalRead, pLen - totalRead), ct);
+                int read = await _stream.ReadAsync(buffer.AsMemory(0, Math.Min(remaining, buffer.Length)), ct);
                 if (read == 0)
                 {
                     return new StorageResult(
                         StorageStatus.IoError,
                         $"Không đọc đủ {pLen} byte của piece {pieceIndex} từ đĩa để băm.");
                 }
-                totalRead += read;
+                hash.AppendData(buffer.AsSpan(0, read));
+                remaining -= read;
             }
 
-            string actualHash = Convert.ToHexString(SHA256.HashData(pieceBuffer)).ToLowerInvariant();
+            string actualHash = Convert.ToHexStringLower(hash.GetHashAndReset());
             string expectedHash = _manifest.PieceHashes[pieceIndex];
 
             if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
-                _verifiedPieces[pieceIndex] = false;
-                _writtenBlocksPerPiece[pieceIndex].SetAll(false);
+                lock (_stateLock)
+                {
+                    _verifiedPieces[pieceIndex] = false;
+                    _writtenBlocksPerPiece[pieceIndex].SetAll(false);
+                }
 
                 return new StorageResult(
                     StorageStatus.HashMismatch,
@@ -323,7 +346,8 @@ public sealed class FileStorage : IDisposable
                     ActualHash: actualHash);
             }
 
-            _verifiedPieces[pieceIndex] = true;
+            lock (_stateLock)
+                _verifiedPieces[pieceIndex] = true;
             return new StorageResult(StorageStatus.Verified, ExpectedHash: expectedHash, ActualHash: actualHash);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -345,7 +369,7 @@ public sealed class FileStorage : IDisposable
 
         for (int p = 0; p < _layout.PieceCount; p++)
         {
-            if (!_verifiedPieces[p])
+            if (!IsPieceVerified(p))
             {
                 var pieceRes = await VerifyPieceAsync(p, ct);
                 if (pieceRes.Status != StorageStatus.Verified)

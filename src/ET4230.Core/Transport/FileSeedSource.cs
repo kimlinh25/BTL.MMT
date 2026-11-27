@@ -9,6 +9,7 @@ public sealed class FileSeedSource(FileStorage storage) : ISeedSource
     public int PieceCount => storage.Layout.PieceCount;
 
     public bool IsVerified(int pieceIndex) => storage.IsPieceVerified(pieceIndex);
+    public bool[] SnapshotVerifiedPieces() => storage.SnapshotVerifiedPieces();
 
     public async ValueTask<BlockReadResult> ReadBlockAsync(BlockRequest request, CancellationToken ct)
     {
