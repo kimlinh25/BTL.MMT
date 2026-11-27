@@ -32,3 +32,5 @@ jobs:
         run: dotnet run --no-build --configuration Release --project src/ET4230.Cli -- --version
       - name: Run W03 TCP loopback via CLI
         run: ./tools/test_w03_cli.ps1
+      - name: Verify three-peer sharing over TCP
+        run: python tools/run_experiments.py --prove-sharing

@@ -23,7 +23,7 @@ public enum ReceiverStatus
 public sealed record ReceiverResult(
     ReceiverStatus Status, int VerifiedPieces, int TotalPieces, string? Detail = null);
 
-public static class SequentialReceiver
+public static partial class SequentialReceiver
 {
     private const byte Hello = 1;
     private const byte HelloOk = 2;
@@ -196,7 +196,7 @@ public static class SequentialReceiver
         await FrameTransport.ReadAsync(stream, cancellationToken)
         ?? throw new EndOfStreamException("Nguồn đóng kết nối khi receiver đang chờ frame.");
 
-    private static void ValidateHello(Frame frame, uint requestId, string fileId)
+    private static Guid ValidateHello(Frame frame, uint requestId, string fileId)
     {
         if (frame.Header.Type != HelloOk || frame.Header.RequestId != requestId)
             throw new InvalidDataException("HELLO_OK không khớp request HELLO.");
@@ -207,6 +207,7 @@ public static class SequentialReceiver
             if (hello is null || !Guid.TryParseExact(hello.PeerId, "D", out Guid id) ||
                 id == Guid.Empty || !string.Equals(hello.FileId, fileId, StringComparison.Ordinal))
                 throw new InvalidDataException("HELLO_OK thiếu peerId hợp lệ hoặc sai fileId.");
+            return id;
         }
         catch (JsonException ex)
         {

@@ -1,5 +1,9 @@
 # Nhật ký dự án
 
+## 27/11/2026 — Hoàn thiện code P2P và runner
+
+Theo yêu cầu Linh, Codex thêm đường P2P và runner vào worktree tách riêng, giữ lệnh W03. Dùng một yêu cầu BLOCK đang chờ mỗi lượt tải, giới hạn phiên upload, lấy snapshot Verified nhất quán, chỉ quảng bá sau khi có piece đã xác minh và chờ phiên dừng trước khi đóng storage. Windows/.NET 10.0.301/Python 3.13.13: `dotnet build ET4230.P2P.sln -c Release`, xUnit 92/92, `tools/test_w03_cli.ps1`, `python tools/run_experiments.py --prove-sharing` và `--smoke`. Proof B cấp dữ liệu khi đang tải, B và C nhận đúng hash cho tệp 2.097.155 byte. Smoke 3/4 peer, 3 kịch bản × 2 mode, 26 hoàn tất và 4 rời theo lịch. Checker xác minh 21 tệp Vst snapshot. Công sức hỗ trợ được ghi là Codex, chưa xác nhận đóng góp cá nhân hoặc nộp bài. Không stage, commit hoặc push.
+
 ## L001 Ngày 23/10/2026 Khởi tạo theo slide và mô hình Hệ điều hành
 
 Nguồn trực tiếp: Linh yêu cầu nghiên cứu thư mục Slide, tạo dự án A–Z theo cách tổ chức môn Hệ điều hành, nhóm 5 người Linh/Minh/Cường/Quân/Tú. Linh xác nhận dùng C# được phép. Các nhận định trước về C++ hoặc phải xác nhận lại C# đã được cập nhật.

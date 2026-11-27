@@ -1,5 +1,9 @@
 # Trạng thái hiện tại ET4230
 
+## 27/11/2026 — Hoàn thiện code P2P và runner
+
+Linh giao Codex viết hoàn chỉnh phần chương trình. Worktree `C:/Users/KimSakota/.codex/tmp/et4230-p2p-complete-20261127`, nhánh `codex/p2p-complete` từ `061404f`. Có CLI `peer` nhiều nguồn, tracker/heartbeat, chia sẻ piece Verified trong khi tải, đổi nguồn hữu hạn và kiểm SHA-256 trước khi công bố tệp. Luồng `download` một nguồn là đối chứng. Runner so sánh hai chế độ qua 3 kịch bản và lưu log/CSV. Build Release và 92/92 xUnit đạt, script W03 đạt, proof ba peer loopback đạt, smoke 12 lượt có 26 receiver hoàn tất đúng hash và 4 receiver rời theo lịch. Bản này lưu local, chưa lên GitHub. Chưa có ca LAN hai máy và kết quả ma trận chính thức.
+
 ## W03 — Luồng TCP một nguồn, 22/11/2026
 
 W03 trên repo tạm [kimlinh25/BTL.MMT](https://github.com/kimlinh25/BTL.MMT) gồm transport/seed (#26), manifest/storage (#27), receiver tuần tự (#28), tracker/discovery (#29), và CLI tích hợp (#30) tiếp nối khung W03 của Tú. Tracker và peer đọc frame qua cùng lớp transport v1. Seed chỉ phục vụ block đã xác minh. Downloader công bố tệp đích sau khi xác minh toàn tệp.

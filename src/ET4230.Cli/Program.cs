@@ -9,21 +9,21 @@ static async Task<int> RunAsync(string[] arguments)
 {
     if (arguments.Length == 0 || arguments is ["--help"] or ["-h"])
     {
-        Console.WriteLine("ET4230 P2P — truyền tệp TCP một nguồn");
-        Console.WriteLine("Các mode: tracker, seed, download.");
+        Console.WriteLine("ET4230 P2P — truyền tệp TCP");
+        Console.WriteLine("Các mode: tracker, seed, download (một nguồn), peer (P2P).");
         Console.WriteLine("Cách dùng: dotnet run --project src/ET4230.Cli -- <mode> --config <tệp-json>");
-        Console.WriteLine("Xem <mode> --help, --version và hướng dẫn chạy W03 trong README.md.");
+        Console.WriteLine("Xem <mode> --help, --version và hướng dẫn trong README.md.");
         return 0;
     }
 
     if (arguments is ["--version"])
     {
-        Console.WriteLine("ET4230.P2P 0.1.0-w03");
+        Console.WriteLine("ET4230.P2P 0.2.0");
         return 0;
     }
 
     string mode = arguments[0];
-    if (mode is not ("tracker" or "seed" or "download"))
+    if (mode is not ("tracker" or "seed" or "download" or "peer"))
     {
         Console.Error.WriteLine($"Mode không được hỗ trợ: '{mode}'. Dùng --help để xem các mode.");
         return 2;
@@ -37,6 +37,7 @@ static async Task<int> RunAsync(string[] arguments)
         {
             "tracker" => "Lắng nghe tại tracker.bindHost:port.",
             "seed" => "Xác minh file.sourcePath, tạo hoặc đọc manifest và đăng ký seed với tracker.",
+            "peer" => "Tải từ nhiều peer qua tracker và phục vụ piece đã xác minh trong khi tải.",
             _ => "Đọc manifest tin cậy, tìm một seed qua tracker và tải tới file.outputPath."
         });
         Console.WriteLine("Xem cấu hình mẫu trong README.md.");
@@ -69,6 +70,9 @@ static async Task<int> RunAsync(string[] arguments)
                 break;
             case "download":
                 await W03Transfer.RunDownloadAsync(config, shutdown.Token);
+                break;
+            case "peer":
+                await W03Transfer.RunPeerAsync(config, shutdown.Token);
                 break;
         }
         return 0;

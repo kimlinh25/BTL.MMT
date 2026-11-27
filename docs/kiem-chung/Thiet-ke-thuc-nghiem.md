@@ -1,6 +1,6 @@
 # Thiết kế thực nghiệm tái lập
 
-Đây là kế hoạch, chưa có số đo. [Cấu hình ma trận](../../configs/experiments.json) ghi 3 kịch bản và giá trị khảo sát; chưa có runner ứng dụng. Sau lượt calibration mới chốt kích thước tệp, timeout và mức tải.
+[Cấu hình ma trận](../../configs/experiments.json) ghi 3 kịch bản và giá trị khảo sát. [Runner CLI](../../tools/run_experiments.py) tạo các tiến trình .NET thật trên TCP loopback và lưu CSV/config/log. Dùng bước chạy nhanh trong [README](../../README.md#chạy-p2p-nhiều-nguồn-và-thu-số-liệu) để kiểm cấu hình, sau đó hiệu chỉnh kích thước tệp, timeout và mức tải trước khi đo chính thức. Khi dùng runner, thời gian mỗi receiver lấy từ lúc vào CLI đến lúc công bố tệp, còn thời gian chung và lịch rời lấy từ đồng hồ monotonic của runner, tính từ lúc bắt đầu khởi chạy receiver đầu tiên.
 
 ## Câu hỏi và biến
 

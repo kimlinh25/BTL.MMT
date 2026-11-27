@@ -1,11 +1,11 @@
 # BTL.MMT · ET4230 Đề 14 Chia sẻ tệp P2P bằng C#
 
-> Nhóm làm tiếp trên **kimlinh25/BTL.MMT** từ 07/11/2026. Xem [hướng dẫn repo tạm và quay về tài khoản cũ](docs/GitHub-tam-thoi.md).
+> Repo chính là **kimsakota/BTL.MMT**. Lịch sử chuyển tài khoản nằm ở [ghi chú GitHub](docs/GitHub-tam-thoi.md).
 
 
 Dự án của **Linh, Minh, Cường, Quân, Tú**, chuẩn bị ngày 23/10/2026. Mục tiêu là tự xây hệ thống truyền tệp TCP nhiều nguồn, chia sẻ lại phân mảnh đã xác minh và phục hồi khi peer rời mạng; áp dụng kiến thức buffer, I/O và ownership từ VstHelper.
 
-**W03 có đường tải tệp TCP từ một nguồn.** CLI chạy tracker, seed và download. Receiver lấy địa chỉ seed từ tracker, nhận từng block, xác minh SHA-256 và công bố tệp hoàn chỉnh. Trạng thái và phạm vi kiểm chứng nằm ở [bộ nhớ dự án](.github/agent/CURRENT_STATE.md).
+CLI có bốn lệnh. `tracker` giới thiệu nguồn theo fileId. `seed` phục vụ tệp đầy đủ. `download` tải từ một nguồn để làm đối chứng client–server. `peer` tải từ nhiều nguồn và chia sẻ lại piece đã xác minh trong lúc tải. Cả hai chế độ chỉ công bố tệp sau khi SHA-256 toàn tệp khớp. Trạng thái và phạm vi kiểm chứng nằm ở [bộ nhớ dự án](.github/agent/CURRENT_STATE.md).
 
 [Kiểm tra bộ khởi tạo](docs/trien-khai/Kiem-tra-bo-khoi-tao.md): build Debug/Release thành công, CLI trả exit code đúng; 10 warning CS8500 của Vst được giữ để audit. Repository: [kimsakota/BTL.MMT](https://github.com/kimsakota/BTL.MMT), nhánh chính `main`.
 
@@ -83,12 +83,41 @@ Get-FileHash demo/data/source.bin, demo/data/received.bin -Algorithm SHA256
 
 Đường dẫn tệp được giải tương đối theo thư mục chứa JSON. Seed tạo manifest v1 nếu chưa có hoặc kiểm tệp nguồn theo manifest có sẵn. Khi chạy khác máy, chuyển manifest tin cậy sang bên tải và cấu hình địa chỉ kết nối tương ứng. Lần tải thành công in `DOWNLOAD_OK`, trả mã 0 và công bố tệp đích mới sau khi hash khớp. Lỗi chạy trả mã 1, sai cú pháp hoặc cấu hình trả mã 2. Dùng Ctrl+C để dừng tracker và seed. CI xác nhận TCP loopback trên một máy Windows.
 
+## Chạy P2P nhiều nguồn và thu số liệu
+
+Từ thư mục gốc, build Release rồi chạy các lệnh sau với Python 3.11 trở lên:
+
+```powershell
+dotnet build ET4230.P2P.sln -c Release
+python tools/run_experiments.py --prove-sharing
+python tools/run_experiments.py --smoke
+```
+
+Lệnh đầu của runner chạy ba peer trên TCP loopback. B mở upload khi đã xác minh piece đầu tiên, C bắt đầu sau khi B đăng ký tracker. Kết quả đạt khi C xác minh dữ liệu từ A lẫn B, log của B cho thấy đã cấp piece cho C trong lúc B còn đang tải, và SHA-256 của cả hai tệp đầu ra khớp. Lệnh `--smoke` thử cả hai chế độ với 3 và 4 peer qua ba kịch bản ổn định, upload không đều và peer rời.
+
+Chạy `python tools/run_experiments.py` để dùng ma trận trong [cấu hình thí nghiệm](configs/experiments.json). Mỗi lượt ghi config, stdout/stderr, kết quả SHA-256 và số byte payload từng nguồn trong `results/raw/`. `receivers.csv` giữ trạng thái và thời gian mỗi receiver. `summary.csv` có số ca hoàn tất/rời/lỗi/timeout, trung bình và độ lệch chuẩn của các receiver hoàn tất. `run.json` ghi thời gian theo đồng hồ của runner và lượng upload theo tiến trình. Runner trên một máy đo TCP loopback. Số đo LAN cần chạy trên hai máy và ghi topology tương ứng.
+
+### Chạy ba peer trên hai máy LAN
+
+1. Dùng JSON mẫu ở trên trên hai máy. Giả sử máy 1 có IP `192.168.1.10`, máy 2 có IP `192.168.1.11`. Dùng IP thật thay các giá trị mẫu. `tracker.host` của mọi peer trỏ về máy 1. `tracker.bindHost` trên máy 1 dùng IP của máy 1. Chạy tracker và seed A trên máy 1. Seed dùng `peer.listenHost` và `peer.advertiseHost` bằng IP máy 1, cổng 42301.
+2. Đợi `SEED_READY` rồi chép **manifest** sinh ra sang thư mục config của B và C. Tạo config riêng B trên máy 2, dùng `peer.listenHost` và `peer.advertiseHost` bằng IP máy 2, cổng 42302, và `file.outputPath` là `received-b.bin`. Config C có thể đặt trên máy 1, dùng IP máy 1, cổng 42303 và `received-c.bin`. Dùng các đường dẫn đích mới cho mỗi lượt.
+3. Đặt `strategy.applicationUploadLimitMbps` khoảng 8 cho seed và chọn tệp nhiều piece để B còn tải khi C bắt đầu. Biến này giới hạn payload do tiến trình phục vụ, đơn vị Mbit/s. Đặt `transfer.shareAfterCompletionSeconds` trong config B nếu muốn B tiếp tục phục vụ thêm sau khi công bố tệp. Lệnh cho B và C khác nhau ở file config.
+
+```powershell
+dotnet run -c Release --no-build --project src/ET4230.Cli -- peer --config demo/data/peer-b.json
+dotnet run -c Release --no-build --project src/ET4230.Cli -- peer --config demo/data/peer-c.json
+```
+
+Chạy lệnh B trước. Đợi `PEER_READY` của B rồi chạy C ở terminal của máy còn lại. Lưu log `SEED_READY`, `PEER_READY`, `PIECE_VERIFIED`, `UPLOAD_BLOCK` và `DOWNLOAD_OK`, đồng thời so lại hash bằng `Get-FileHash`. Nếu bắt gói, lọc theo cổng tracker và các cổng peer thực tế. Dùng `download` với chỉ một seed đăng ký để chạy mẫu đối chứng.
+
+Lượt tải mỗi lần chỉ có một BLOCK đang chờ. `strategy.pieceSelection` chọn `sequential` mặc định hoặc `rarest-first` theo BITFIELD của các nguồn đã kết nối. Khi nguồn lỗi, chương trình thử nguồn khác và tải lại từ đầu piece đang dở. Số nguồn đang kết nối và số phiên upload được giới hạn qua `transfer.maxSources` và `peer.maxUploadSessions`. Giữ cùng tệp, kích thước piece/block, topology và giới hạn seed khi so hai chế độ.
+
 ## Sơ đồ tài liệu và source
 
 | Vùng | Trách nhiệm |
 |---|---|
 | `src/ET4230.Core/` | Giao thức, transport, storage, tracker/discovery và receiver tuần tự |
-| `src/ET4230.Cli/` | Điều phối ba lệnh tracker, seed và download |
+| `src/ET4230.Cli/` | Điều phối tracker, seed, download và peer |
 | `src/ET4230.VstReference/` | Build wrapper cho source VstHelper, chưa được CLI/Core gọi |
 | `references/VstHelper/` | 20 file C# và csproj gốc, giữ nguyên byte, có SHA-256 |
 | `configs/` | Tham số peer, giới hạn buffer, danh sách nhóm và thiết kế thí nghiệm |
@@ -98,6 +127,6 @@ Get-FileHash demo/data/source.bin, demo/data/received.bin -Algorithm SHA256
 | `.github/agent/` | Bộ nhớ ngắn, nguồn chuẩn và điểm tiếp tục |
 | `results/`, `plots/`, `demo/` | Quy ước lưu bằng chứng khi có chạy thật |
 
-Workflow `.github/workflows/validate.yml` kiểm tra cấu trúc, config, hash snapshot, build, xUnit và luồng CLI W03 trên Windows khi push hoặc mở PR. Xem trạng thái tại [GitHub Actions](https://github.com/kimlinh25/BTL.MMT/actions).
+Workflow `.github/workflows/validate.yml` kiểm tra cấu trúc, config, hash snapshot, build, xUnit và hai luồng CLI trên TCP loopback khi push hoặc mở PR. Xem trạng thái tại [GitHub Actions](https://github.com/kimsakota/BTL.MMT/actions).
 
 Hướng dẫn cộng tác và GitHub Desktop nằm ở [CONTRIBUTING](CONTRIBUTING.md). Tài liệu tập trung theo nội dung dự án P2P; phân công và tiến độ dùng chung một [Kế hoạch](docs/Ke-hoach.md).

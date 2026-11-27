@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "planned; no measurements have been run",
+  "status": "default matrix for the TCP loopback runner; keep campaign results separate from smoke checks",
   "runsPerConfiguration": 5,
   "totalPeersIncludesSeed": true,
   "totalPeers": [3, 5, 8],
@@ -8,6 +8,7 @@
   "pieceSizeBytes": 1048576,
   "blockSizeBytes": 16384,
   "runDeadlineSeconds": 180,
+  "receiverStartGapSeconds": 0.5,
   "initialSeedApplicationUploadLimitMbps": 100,
   "randomSeeds": [4230, 4231, 4232, 4233, 4234],
   "comparisonOrder": ["client-server_vs_p2p", "sequential_vs_rarest-first", "buffer_strategy"],
